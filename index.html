@@ -1,0 +1,41 @@
+//入口導航與 UI 層
+
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Succuleaf 數位分身 | 專業模組版</title>
+    <link rel="stylesheet" href="./styles/main.css">
+</head>
+
+<body>
+    <div id="loading-screen">
+        <div class="loader-container">
+            <div class="leaf-icon">🌿</div>
+            <div class="progress-wrapper">
+                <div id="loader-bar"></div>
+            </div>
+            <div id="loader-text">正在組裝... 0%</div>
+        </div>
+    </div>
+    <div id="crosshair"></div>
+    <div id="instructions">👉 點擊畫面開始步入<br>W/A/S/D：行走 滑鼠：轉向 | 點擊門：開關門</div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/examples/jsm/loaders/GLTFLoader": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js",
+            "three/examples/jsm/loaders/DRACOLoader": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/DRACOLoader.js",
+            "three/examples/jsm/loaders/EXRLoader": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/EXRLoader.js",
+            "three/examples/jsm/controls/PointerLockControls": "https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js",
+            "three/examples/jsm/renderers/CSS2DRenderer": "https://unpkg.com/three@0.160.0/examples/jsm/renderers/CSS2DRenderer.js"
+        }
+    }
+    </script>
+    <script type="module" src="./scripts/main.js"></script>
+</body>
+
+</html>
