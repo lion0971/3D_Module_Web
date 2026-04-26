@@ -2,7 +2,7 @@
 export const CONFIG = {
     MODELS: {
         PLANT: 'models/Plant_Turtle_LOD.glb',
-        BUILDING: 'models/20260228cad-3d-gltf.glb',
+        BUILDING: 'models/20260418-3d.glb',
         HDRI: 'hdri/studio.exr'
     },
     ROOM_DATA: {
