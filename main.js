@@ -5,19 +5,17 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer';
 import { CONFIG } from './scene-config.js';
-//下方為燈光增加的合成器
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 // --- 初始化變數 ---
 let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-let autoMoveSpeed = 0;
 let prevTime = performance.now();
 const velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
 const collidableObjects = [];
-const doorObjects = [];
+const lightParticles = [];
 
 // --- 1. 場景基礎設置 ---
 const scene = new THREE.Scene();
@@ -28,23 +26,20 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.5;
+renderer.toneMappingExposure = 1.2;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
-// 1. 初始化合成器
+// --- 2. 後處理 (Bloom) ---
 let composer = new EffectComposer(renderer);
-
-// 2. 加入基礎渲染路徑（把原本的場景畫出來）
-const renderPass = new RenderPass(scene, camera);
-composer.addPass(renderPass);
-
-// 3. 加入輝光路徑（UnrealBloomPass）
+composer.addPass(new RenderPass(scene, camera));
+// 降低 Bloom 強度避免爆白 (原本 0.6 改為 0.25)
+// 降低 strength (第一個參數)，建議設為 0.1 ~ 0.15 即可
 const bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2),
-    1.0,  // 強度 (Strength)
-    1.0,  // 半徑 (Radius)
-    1.2   // 閥值(Threshold)
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.12,  // 強度 (原本可能 0.25 或更高)
+  0.4,   // 半徑
+  0.85   // 閾值 (提高此值可以讓較暗的地方不產生發光效果)
 );
 composer.addPass(bloomPass);
 
@@ -55,411 +50,189 @@ labelRenderer.domElement.style.top = '0px';
 labelRenderer.domElement.style.pointerEvents = 'none';
 document.body.appendChild(labelRenderer.domElement);
 
-// --- 2. 燈光與環境 ---
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.03);
-scene.add(ambientLight);
+// --- 3. 核心：粒子生成函式 ---
+function createVolumetricLight(color) {
+  const particleCount = 500;
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(particleCount * 3);
+  const opacities = new Float32Array(particleCount);
 
-const sunLight = new THREE.DirectionalLight(0xffffff, 0.5);
-sunLight.position.set(15, 15, 0);
-scene.add(sunLight);
+  for (let i = 0; i < particleCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radiusFactor = Math.random();
 
+    const y = -Math.random() * 2.5; // 光束長度，2.5公尺
+
+    // 💡 關鍵：降低 spread 係數 (原本可能是 1.5，改成 0.4 左右)
+    // 數值越小，光束越細，角度越窄
+    const spread = 0.02 + ((-y / 2.5) * 0.4);
+    const r = Math.sqrt(radiusFactor) * spread;
+
+    positions[i * 3 + 0] = Math.cos(angle) * r;
+    positions[i * 3 + 1] = y - 0.05;
+    positions[i * 3 + 2] = Math.sin(angle) * r;
+    opacities[i] = 0.3 + Math.random() * 0.7;
+  }
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('opacity', new THREE.BufferAttribute(opacities, 1));
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0.0 },
+      uColor: { value: new THREE.Color(color) }
+    },
+    vertexShader: `
+            attribute float opacity;
+            varying float vOpacity;
+            varying float vY;
+            uniform float uTime;
+            void main() {
+                vOpacity = opacity;
+                vY = position.y;
+                vec3 pos = position;
+                pos.x += sin(uTime * 0.5 + vY) * 0.01; // 微小擾動
+                vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                gl_PointSize = (2.0 + (-vY * 1.5)) * (300.0 / length(mvPosition.xyz));
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `,
+    fragmentShader: `
+            uniform vec3 uColor;
+            varying float vOpacity;
+            varying float vY;
+            void main() {
+                float d = length(gl_PointCoord - vec2(0.5));
+                if (d > 0.5) discard;
+                float mask = smoothstep(0.5, 0.2, d);
+                float topFade = smoothstep(0.0, -0.3, vY);
+                float bottomFade = smoothstep(-2.5, -1.8, vY);
+                // 極低亮度確保溫馨感
+                // 💡 將最後的乘數調得非常低。
+// 從 0.02 降到 0.005 ~ 0.008 之間，這會讓光束看起來像薄霧
+gl_FragColor = vec4(uColor, vOpacity * mask * topFade * bottomFade * 0.006);
+            }
+        `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+
+  return new THREE.Points(geometry, material);
+}
+
+// --- 4. 載入管理與模型 ---
 const manager = new THREE.LoadingManager();
-const loaderBar = document.getElementById('loader-bar');
-const loaderText = document.getElementById('loader-text');
 const loadingScreen = document.getElementById('loading-screen');
 
-new EXRLoader(manager).load(CONFIG.MODELS.HDRI, (hdr) => {
-    hdr.mapping = THREE.EquirectangularReflectionMapping;
-    scene.environment = hdr;
-    scene.environmentIntensity = 0.5;
-});
-
-// --- 3. 控制器與輸入 ---
-const controls = new PointerLockControls(camera, renderer.domElement);
-renderer.domElement.addEventListener('click', () => controls.lock());
-scene.add(controls.getObject());
-
-// 修正關鍵：在這裡重新強制相機轉向
-camera.lookAt(
-    CONFIG.CAMERA.lookAtPos.x,
-    CONFIG.CAMERA.lookAtPos.y,
-    CONFIG.CAMERA.lookAtPos.z
-);
-
-const onKeyDown = (e) => {
-    switch (e.code) {
-        case 'KeyW': moveForward = true; break;
-        case 'KeyA': moveLeft = true; break;
-        case 'KeyS': moveBackward = true; break;
-        case 'KeyD': moveRight = true; break;
-    }
+manager.onLoad = () => {
+  console.log("所有資源載入完成");
+  if (loadingScreen) {
+    loadingScreen.classList.add('fade-out');
+    setTimeout(() => { loadingScreen.style.display = 'none'; }, 1000);
+  }
 };
-const onKeyUp = (e) => {
-    switch (e.code) {
-        case 'KeyW': moveForward = false; break;
-        case 'KeyA': moveLeft = false; break;
-        case 'KeyS': moveBackward = false; break;
-        case 'KeyD': moveRight = false; break;
-    }
-};
-document.addEventListener('keydown', onKeyDown);
-document.addEventListener('keyup', onKeyUp);
 
-// --- 4. 模型載入邏輯 ---
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader(manager);
 loader.setDRACOLoader(dracoLoader);
 
-// 載入植物 (LOD 優化)
-loader.load(CONFIG.MODELS.PLANT, (gltf) => {
-    const modelScene = gltf.scene;
-    const lod = new THREE.LOD();
-
-    const createLODLevel = (namePrefix) => {
-        const group = new THREE.Group();
-        modelScene.traverse((node) => {
-            if (node.isMesh && node.name.startsWith(namePrefix)) {
-                const cloned = node.clone();
-                cloned.material = node.material.clone();
-                cloned.material.side = THREE.DoubleSide;
-
-                if (node.name.toLowerCase().includes('leaf') || node.name.toLowerCase().includes('plant')) {
-                    cloned.material.roughness = 0.6;
-                }
-                if (node.name.includes('Vase') || node.name.endsWith('_1')) {
-                    cloned.material.metalness = 0.7;
-                    cloned.material.roughness = 0.005;
-                    cloned.material.flatShading = true;
-                }
-                group.add(cloned);
-            }
-        });
-        return group;
-    };
-
-    lod.addLevel(createLODLevel('Plant_Turtle_LOD_High'), 0);
-    lod.addLevel(createLODLevel('Plant_Turtle_LOD_Mid'), 15);
-    lod.addLevel(createLODLevel('Plant_Turtle_LOD_Low'), 40);
-
-    // 初始位置放置在鏡頭前
-    const cameraDirection = new THREE.Vector3();
-    camera.getWorldDirection(cameraDirection);
-    lod.position.copy(camera.position.clone().add(cameraDirection.multiplyScalar(5)));
-    scene.add(lod);
+scene.add(new THREE.AmbientLight(0xffffff, 0.05));
+new EXRLoader(manager).load(CONFIG.MODELS.HDRI, (hdr) => {
+  hdr.mapping = THREE.EquirectangularReflectionMapping;
+  scene.environment = hdr;
 });
 
-// 載入建築物
 loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
-    gltf.scene.traverse((mesh) => {
-        if (!mesh.isMesh) return;
+  scene.add(gltf.scene);
 
-        // 統一轉小寫，避免大小寫不匹配
-        const name = mesh.name.toLowerCase();
+  gltf.scene.traverse((mesh) => {
+    if (!mesh.isMesh) return;
 
-        // --- 第一部分：處理燈泡與光源 ---
-        if (name.includes("lightbulb")) {
-            const worldPosition = new THREE.Vector3();
-            mesh.getWorldPosition(worldPosition);
+    const name = mesh.name.toLowerCase();
 
-            // 建立點光源，加長距離至 30
-            const light = new THREE.PointLight(0xfff3d4, 0.2, 30);
-            light.position.copy(worldPosition);
-            light.decay = 2.0;
-            light.castShadow = false; // 取消陰影以節省效能
-            scene.add(light);
+    // --- 核心修正：改用父子綁定法 ---
+    if (name.includes("bulb")) {
+      console.log("發現燈泡，綁定光束:", mesh.name);
 
-            if (mesh.material) {
-                mesh.material.emissive = new THREE.Color(0xfff3d4);
-                mesh.material.emissiveIntensity = 2.5; // 超過 Threshold 確保 Bloom 效果
-            }
-        }
+      // 1. 生成光束 (相對於燈泡中心 0,0,0)
+      const vLight = createVolumetricLight(0xfff3d4);
 
-        if (name.includes("cone")) {
-            // 💡 先暫存原本從 Blender 匯入的材質資訊
-            const originalMaterial = mesh.material;
-            const blenderColor = originalMaterial.color; // 抓取 Blender 的 Base Color
-            const blenderOpacity = originalMaterial.opacity; // 抓取 Blender 的 Alpha 值
+      // 2. 💡 關鍵：直接將光束加為燈泡的「子物件」
+      // 這樣不管模型怎麼移動，光束都會自動跟隨，不會瞬移到外面
+      mesh.add(vLight);
+      lightParticles.push(vLight);
 
-            const beamMaterial = new THREE.ShaderMaterial({
-                uniforms: {
-                    // 💡 改為抓取原始材質的數值
-                    beamColor: { value: blenderColor },
-                    uOpacity: { value: blenderOpacity },
-                    fresnelParams: { value: new THREE.Vector3(0.1, 3.5, 0.8) }
-                },
-                vertexShader: `
-            varying vec3 vNormal;
-            varying vec3 vViewPosition;
-            varying float vY;
-            void main() {
-                vNormal = normalize(normalMatrix * normal);
-                vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-                vViewPosition = -mvPosition.xyz;
-                vY = position.y; 
-                gl_Position = projectionMatrix * mvPosition;
-            }
-        `,
-                fragmentShader: `
-            uniform vec3 beamColor;
-            uniform vec3 fresnelParams;
-            uniform float uOpacity;
-            varying vec3 vNormal;
-            varying vec3 vViewPosition;
-            varying float vY;
+      // 3. 燈泡本體發光
+      if (mesh.material) {
+        mesh.material.emissive = new THREE.Color(0xfff3d4);
+        mesh.material.emissiveIntensity = 0.5; // 調低這個，讓燈泡有顏色而不是純白
+      }
+    }
 
-            void main() {
-                vec3 normal = normalize(vNormal);
-                vec3 viewDir = normalize(vViewPosition);
-                float dotProduct = dot(normal, viewDir);
-                float fresnelStrength = fresnelParams.x + fresnelParams.z * pow(1.0 - max(dotProduct, 0.0), fresnelParams.y);
-
-                float yGradient = smoothstep(-2.0, 0.5, vY); 
-                float yCap = smoothstep(1.0, 0.8, vY); 
-
-                float finalAlpha = fresnelStrength * yGradient * yCap * uOpacity;
-                gl_FragColor = vec4(beamColor, finalAlpha);
-            }
-        `,
-                transparent: true,
-                depthWrite: false,
-                side: THREE.DoubleSide,
-                blending: THREE.AdditiveBlending
-            });
-
-            mesh.material = beamMaterial;
-            mesh.renderOrder = 999;
-            mesh.castShadow = false;
-            mesh.receiveShadow = false;
-        }
-
-        //方法一：
-        // --- 第二部分：處理光束圓錐 (核心修正處) ---
-        // 使用全小寫變數 name 來判定
-        // if (name.includes("cone")) {
-        //     console.log("✅ 正在修復並套用高級菲涅耳光束:", mesh.name);
-
-        //     const beamMaterial = new THREE.ShaderMaterial({
-        //         uniforms: {
-        //             beamColor: { value: new THREE.Color(0xfff3d4) },
-        //             fresnelParams: { value: new THREE.Vector3(0.1, 3.5, 0.8) }, // bias, power, scale
-        //             uOpacity: { value: 0.7 }
-        //         },
-        //         vertexShader: `
-        //     varying vec3 vNormal;
-        //     varying vec3 vViewPosition;
-        //     varying float vY;
-
-        //     void main() {
-        //         vNormal = normalize(normalMatrix * normal);
-        //         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        //         vViewPosition = -mvPosition.xyz;
-        //         vY = position.y; 
-        //         gl_Position = projectionMatrix * mvPosition;
-        //     }
-        // `,
-        //         fragmentShader: `
-        //     uniform vec3 beamColor;
-        //     uniform vec3 fresnelParams;
-        //     uniform float uOpacity;
-
-        //     varying vec3 vNormal;
-        //     varying vec3 vViewPosition;
-        //     varying float vY;
-
-        //     void main() {
-        //         // 1. 菲涅耳邊緣光計算
-        //         vec3 normal = normalize(vNormal);
-        //         vec3 viewDir = normalize(vViewPosition);
-        //         float dotProduct = dot(normal, viewDir);
-        //         float fresnelStrength = fresnelParams.x + fresnelParams.z * pow(1.0 - max(dotProduct, 0.0), fresnelParams.y);
-
-        //         // 2. 漸層邏輯結合
-        //         // yGradient: 底部消失 (smoothstep 第一個參數可依需求調整如 -2.0)
-        //         float yGradient = smoothstep(-2.0, 0.5, vY); 
-
-        //         // yCap: 頂部虛化壓制 (解決燈頭過亮爆白問題)
-        //         float yCap = smoothstep(1.0, 0.8, vY); 
-
-        //         // 3. 最終合成
-        //         float finalAlpha = fresnelStrength * yGradient * yCap * uOpacity;
-
-        //         gl_FragColor = vec4(beamColor, finalAlpha);
-        //     }
-        // `,
-        //         transparent: true,
-        //         depthWrite: false,
-        //         side: THREE.DoubleSide,
-        //         blending: THREE.AdditiveBlending
-        //     });
-
-        //     mesh.material = beamMaterial;
-        //     mesh.renderOrder = 999;
-        //     mesh.castShadow = false;
-        //     mesh.receiveShadow = false;
-        // }
-        //方法二：
-        // if (name.includes("cone")) {
-        //     console.log("✅ 重新修正光束材質:", mesh.name);
-
-        //     // 直接在建立時定義 uniforms，確保 Shader 抓得到值
-        //     const beamMaterial = new THREE.ShaderMaterial({
-        //         uniforms: {
-        //             beamColor: { value: new THREE.Color(0xfff3d4) },
-        //             uOpacity: { value: 0.3 } // 稍微改名避免與內建變數衝突
-        //         },
-        //         vertexShader: `
-        //     varying vec3 vPos;
-        //     void main() {
-        //         vPos = position; // 傳遞完整座標，避免單一軸向錯誤
-        //         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        //     }
-        // `,                // 調整漸層：如果光不見了，試著將 -2.0, 0.3 調小，或是確認模型在 Blender 裡的本地座標中心點位置。
-        //         fragmentShader: `
-        //     varying vec3 vPos;
-        //     uniform vec3 beamColor;
-        //     uniform float uOpacity;
-        //     void main() {
-
-        //         float strength = smoothstep(-2.0, 0.5, vPos.y); 
-        //         gl_FragColor = vec4(beamColor, strength * uOpacity);
-        //     }
-        // `,
-        //         transparent: true,
-        //         depthWrite: false, // 確保不擋住陽光
-        //         side: THREE.DoubleSide,
-        //         blending: THREE.AdditiveBlending
-        //     });
-
-        //     mesh.material = beamMaterial;
-        //     mesh.renderOrder = 999;
-        //     mesh.castShadow = false;
-        //     mesh.receiveShadow = false;
-        // }
-
-        // --- 第三部分：碰撞與標籤邏輯 (原本的邏輯) ---
-        if (name.includes("wall") || (name.includes("door") && !name.includes("locker"))) {
-            if (!name.includes("floor") && !name.includes("ground")) {
-                collidableObjects.push(mesh);
-            }
-        }
-
-        if (name.includes("door") || name.includes("門")) {
-            doorObjects.push(mesh);
-            mesh.userData.isOpen = false;
-        }
-
-        if (CONFIG.ROOM_DATA[mesh.name]) {
-            const div = document.createElement('div');
-            div.className = 'door-label';
-            div.textContent = CONFIG.ROOM_DATA[mesh.name];
-            mesh.userData.labelDiv = div;
-            mesh.userData.roomName = CONFIG.ROOM_DATA[mesh.name];
-            const label = new CSS2DObject(div);
-            label.position.set(0, 2.2, 0);
-            mesh.add(label);
-        }
-    });
-
-    scene.add(gltf.scene);
+    // 碰撞設定
+    if (name.includes("wall") || (name.includes("door") && !name.includes("locker"))) {
+      collidableObjects.push(mesh);
+    }
+  });
 }, (xhr) => {
-    const percent = Math.round((xhr.loaded / xhr.total) * 100);
-    loaderBar.style.width = percent + '%';
-    loaderText.innerText = percent >= 100 ? `優化數據中...` : `載入數位分身... ${percent}%`;
+  console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+}, (error) => {
+  console.error("載入模型出錯:", error);
 });
 
-// --- 5. 互動與起動 ---
-manager.onLoad = () => {
-    setTimeout(() => {
-        loadingScreen.classList.add('fade-out');
-        autoMoveSpeed = 2.5;
-        setTimeout(() => { loadingScreen.style.display = 'none'; }, 1200);
-    }, 1000);
+// --- 5. 控制與動畫 ---
+const controls = new PointerLockControls(camera, renderer.domElement);
+renderer.domElement.addEventListener('click', () => controls.lock());
+
+const onKeyDown = (e) => {
+  if (e.code === 'KeyW') moveForward = true;
+  if (e.code === 'KeyS') moveBackward = true;
+  if (e.code === 'KeyA') moveLeft = true;
+  if (e.code === 'KeyD') moveRight = true;
 };
+const onKeyUp = (e) => {
+  if (e.code === 'KeyW') moveForward = false;
+  if (e.code === 'KeyS') moveBackward = false;
+  if (e.code === 'KeyA') moveLeft = false;
+  if (e.code === 'KeyD') moveRight = false;
+};
+document.addEventListener('keydown', onKeyDown);
+document.addEventListener('keyup', onKeyUp);
 
-// 開門射線
-const raycaster = new THREE.Raycaster();
-document.addEventListener('click', () => {
-    if (!controls.isLocked) return;
-    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-    const intersects = raycaster.intersectObjects(doorObjects);
-    if (intersects.length > 0) {
-        const door = intersects[0].object;
-        door.userData.isOpen = !door.userData.isOpen;
-        const openAngle = door.name === "out_door" ? -Math.PI / 2 : Math.PI / 2;
-        door.rotation.y = door.userData.isOpen ? openAngle : 0;
-    }
-});
-
-// --- 6. 動畫循環與更新 ---
 function animate() {
-    requestAnimationFrame(animate);
-    const time = performance.now();
-    const delta = (time - prevTime) / 1000;
+  requestAnimationFrame(animate);
+  const time = performance.now() / 1000;
+  const delta = Math.min(time - prevTime, 0.1);
 
-    // 更新 LOD
-    scene.traverse(obj => { if (obj.isLOD) obj.update(camera); });
+  lightParticles.forEach(p => {
+    if (p.material.uniforms) p.material.uniforms.uTime.value = time;
+  });
 
-    // 自動進場效果
-    if (autoMoveSpeed > 0.01) {
-        controls.moveForward(autoMoveSpeed * delta);
-        autoMoveSpeed *= Math.pow(0.95, delta * 60);
-    }
+  if (controls.isLocked) {
+    velocity.x -= velocity.x * 10.0 * delta;
+    velocity.z -= velocity.z * 10.0 * delta;
+    direction.z = Number(moveForward) - Number(moveBackward);
+    direction.x = Number(moveRight) - Number(moveLeft);
+    direction.normalize();
 
-    if (controls.isLocked) {
-        // 摩擦力模擬
-        velocity.x -= velocity.x * 10.0 * delta;
-        velocity.z -= velocity.z * 10.0 * delta;
+    if (moveForward || moveBackward) velocity.z -= direction.z * 40.0 * delta;
+    if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
 
-        direction.z = Number(moveForward) - Number(moveBackward);
-        direction.x = Number(moveRight) - Number(moveLeft);
-        direction.normalize();
+    controls.moveForward(-velocity.z * delta);
+    controls.moveRight(-velocity.x * delta);
+  }
 
-        const checkWall = (dirVector) => {
-            const colRaycaster = new THREE.Raycaster();
-            const worldDir = dirVector.clone().applyQuaternion(camera.quaternion);
-            worldDir.y = 0; worldDir.normalize();
-            colRaycaster.set(camera.position.clone().setY(camera.position.y - 0.8), worldDir);
-            colRaycaster.far = 0.6;
-            return colRaycaster.intersectObjects(collidableObjects).length > 0;
-        };
-
-        if (moveForward || moveBackward) {
-            const moveDir = moveForward ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 0, 1);
-            if (!checkWall(moveDir)) velocity.z -= direction.z * 40.0 * delta;
-        }
-        if (moveLeft || moveRight) {
-            const moveDir = moveLeft ? new THREE.Vector3(-1, 0, 0) : new THREE.Vector3(1, 0, 0);
-            if (!checkWall(moveDir)) velocity.x -= direction.x * 40.0 * delta;
-        }
-
-        controls.moveForward(-velocity.z * delta);
-        controls.moveRight(-velocity.x * delta);
-    }
-
-    // 更新標籤透明度與虛擬溫度
-    doorObjects.forEach(door => {
-        if (door.userData.labelDiv) {
-            const dist = camera.position.distanceTo(door.getWorldPosition(new THREE.Vector3()));
-            door.userData.labelDiv.style.opacity = 1.0 - THREE.MathUtils.smoothstep(dist, 5, 15);
-            if (Math.random() > 0.995) {
-                const temp = (24 + Math.random()).toFixed(1);
-                door.userData.labelDiv.textContent = `${door.userData.roomName} (${temp}°C)`;
-            }
-        }
-    });
-
-    prevTime = time;
-    composer.render();
-    labelRenderer.render(scene, camera);
+  prevTime = time;
+  composer.render();
+  labelRenderer.render(scene, camera);
 }
-
 animate();
 
-// 視窗調整
 window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    labelRenderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
 });
