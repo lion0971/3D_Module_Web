@@ -16,7 +16,7 @@ const velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
 const collidableObjects = [];
 const lightParticles = [];
-const interactiveDoors = [];
+const interactiveDoors = []; 
 
 // --- 1. 場景基礎設置 ---
 const scene = new THREE.Scene();
@@ -52,61 +52,84 @@ labelRenderer.domElement.style.pointerEvents = 'none';
 document.body.appendChild(labelRenderer.domElement);
 
 // --- 3. 圓錐粒子生成函式 ---
-// --- 3. 修正後的圓錐氛圍光體 (使用 ConeGeometry 替代粒子) ---
-function createConeVolumetricLight(color) {
-    const h = 2.5; // 圓錐高度
-    const baseRadius = 0.45; // 圓錐底部半徑 (決定圓錐開展程度)
+function createVolumetricLight(color) {
+    const particleCount = 800; 
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const opacities = new Float32Array(particleCount);
 
-    // 創建一個向下的圓錐體。
-    // Tube: true 讓它呈現空心管狀，底部不封口。
-    const geometry = new THREE.ConeGeometry(baseRadius, h, 32, 1, true);
+    for (let i = 0; i < particleCount; i++) {
+        const h = 3.0; // 圓錐高度
+        const y = -Math.random() * h; 
+        const angle = Math.random() * Math.PI * 2;
+        
+        // 圓錐半徑公式：隨 y 增加而線性擴大
+        // 頂端 (y=0) 半徑趨近 0，底部 (y=-3) 半徑最大
+        const spread = 0.5; 
+        const radius = (-y / h) * spread * Math.sqrt(Math.random());
 
-    // Shader 材質，實現頂部柔和漸隱，邊緣柔和的效果
+        positions[i * 3 + 0] = Math.cos(angle) * radius;
+        positions[i * 3 + 1] = y - 0.1; // 稍微下移，避開燈罩頂部
+        positions[i * 3 + 2] = Math.sin(angle) * radius;
+        
+        opacities[i] = 0.2 + Math.random() * 0.8;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('opacity', new THREE.BufferAttribute(opacities, 1));
+
     const material = new THREE.ShaderMaterial({
         uniforms: {
-            uColor: { value: new THREE.Color(color) },
-            uHeight: { value: h } // 傳遞圓錐高度給 Shader
+            uTime: { value: 0.0 },
+            uColor: { value: new THREE.Color(color) }
         },
         vertexShader: `
+            attribute float opacity;
+            varying float vOpacity;
             varying float vY;
+            uniform float uTime;
             void main() {
-                vY = position.y; // 傳遞局部 Y 坐標
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                vOpacity = opacity;
+                vY = position.y;
+                vec3 pos = position;
+                
+                // 微小隨機晃動
+                pos.x += sin(uTime * 0.5 + vY) * 0.015;
+                pos.z += cos(uTime * 0.5 + vY) * 0.015;
+
+                vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                // 距離越遠，粒子視覺尺寸越大
+                gl_PointSize = (1.2 + (-vY * 0.8)) * (300.0 / length(mvPosition.xyz));
+                gl_Position = projectionMatrix * mvPosition;
             }
         `,
         fragmentShader: `
             uniform vec3 uColor;
-            uniform float uHeight;
+            uniform float uTime;
+            varying float vOpacity;
             varying float vY;
             void main() {
-                // 核心邏輯：頂部 (y = uHeight/2) 最暗，底部 (y = -uHeight/2) 最暗。
-                // 確保與燈座接觸點 (尖端) 是柔和的。
+                float d = length(gl_PointCoord - vec2(0.5));
+                if (d > 0.5) discard;
                 
-                // 1. 垂直過渡：讓光束從頂部開始慢慢變亮，底部慢慢變暗。
-                float verticalFade = smoothstep(uHeight/2.0, uHeight/2.0 - 0.2, vY) * // 頂部極尖端柔和
-                                    smoothstep(-uHeight/2.0, -uHeight/2.0 + 1.0, vY); // 底部漸隱
+                float mask = smoothstep(0.5, 0.2, d);
                 
-                // 2. [進階] 圓錐邊緣柔化 (如果需要可以添加)
-                // 此處省略，僅使用垂直過渡已能解決切邊問題。
-
-                // 3. Alpha 控制：使用較低的基礎 Alpha
-                float alpha = 0.1 * verticalFade;
+                // 垂直衰減：頂部漸強，底部漸弱
+                float topFade = smoothstep(0.0, -0.3, vY);
+                float bottomFade = smoothstep(-3.0, -1.0, vY);
+                
+                // Alpha 控制：0.15 是關鍵，避免多粒子重疊變成死白
+                float alpha = vOpacity * mask * topFade * bottomFade * 0.03;
                 
                 gl_FragColor = vec4(uColor, alpha);
             }
         `,
-        transparent: true, // 必須開啟透明
-        depthWrite: false, // 必須關閉深度寫入，避免硬切邊
-        blending: THREE.AdditiveBlending, // 加法混合，保持光束的靈動感
-        side: THREE.DoubleSide // 雙面渲染，確保從內部也能看到
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
     });
 
-    const coneMesh = new THREE.Mesh(geometry, material);
-
-    // ConeGeometry 的坐標原點在體積中心。將其下移，使其尖端與模型原點重合。
-    coneMesh.position.y = -h / 2;
-
-    return coneMesh;
+    return new THREE.Points(geometry, material);
 }
 
 // --- 4. 載入與資源管理 ---
@@ -145,47 +168,51 @@ function checkDoorInteraction() {
 }
 
 // 載入模型並應用燈光
-// --- 5. 互動與模型載入 (使用 Cone Volumetric Light) ---
+// 尋找並修改模型載入部分的邏輯
 loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
     scene.add(gltf.scene);
     gltf.scene.traverse((mesh) => {
         if (!mesh.isMesh) return;
         const name = mesh.name.toLowerCase();
 
+        // --- 核心修正區塊 ---
         if (name.includes("bulb")) {
-            const lightColor = 0xfff5d7; // 統一暖白光
-            
-                        // 1. 修改燈泡材質為強大的自發光實體
-                        if (mesh.material) {
-                            mesh.material = new THREE.MeshStandardMaterial({
-                                color: 0x666666,        // [調暗] 基礎顏色，避免本體過白
-                                emissive: new THREE.Color(lightColor),
-                                emissiveIntensity: 50.0, // [降低] 從 15~20 降到 5.0，配合 Bloom 的新參數
-                                toneMapped: true        // [改回 true] 讓它受曝光度控制，避免直接爆白
-                            });
-                        }
+            console.log("找到燈泡/燈座模型:", mesh.name);
 
-            // 2. [新的氛圍光體] 柔和圓錐體模型
-            const vConeLight = createConeVolumetricLight(0xfff5d7);
-            // --- 💡 關鍵對齊處 ---
-            // 需要微調 y 軸，讓圓錐模型的頂端隱藏在燈座模型「內部」。
-            // 原本粒子 y=-0.2，這裡需要反過來向上偏移。建議設為 y=0.1 到 0.2。
-            // 這會消除 image_3.png 中那個生硬的切邊線。
-            vConeLight.position.y = 0.15; // 從燈座原點向上偏移 0.15
-            mesh.add(vConeLight);
-            
-            // 注意：這裡不需要 push 到 lightParticles 數組了，因為 Cone 不再使用 uTime。
-            // 如果你的 animate 函式裡有 lightParticles.forEach，請將其註解或刪除。
+            // 1. [核心修正] 關閉模型本身的生硬自發光
+            // 這是導致燈座死白和位置太亮的元兇
+            if (mesh.material) {
+                mesh.material.emissive = new THREE.Color(0x000000); // 設為黑色 (不發光)
+                mesh.material.emissiveIntensity = 0; // 強度歸零
+                
+                // [進階] 如果模型材質有 Map，可以嘗試讓它變暗，更像沒開燈的燈座
+                if (mesh.material.map) {
+                    mesh.material.color.setHex(0x333333); // 降低基礎顏色，使其呈現深灰色
+                }
+            }
+
+            // 2. [保留] 氛圍粒子光束 (你覺得很好的效果來源之一)
+            // 將粒子稍微下移 (y-0.2)，避免尖端與燈座重疊
+            const vLight = createVolumetricLight(0xfff5d7);
+            vLight.position.y = -0.2; 
+            mesh.add(vLight);
+            lightParticles.push(vLight);
 
             // 3. [保留] 實體 SpotLight (地面投影)
+            // 確保 SpotLight 是從燈座下方放射出來
             const spotLight = new THREE.SpotLight(0xfff5d7, 2.5, 12, Math.PI / 4, 0.5, 2);
-            spotLight.position.set(0, 0, 0); 
+            spotLight.position.set(0, -0.1, 0); // 從燈座下方一點點開始照射
             mesh.add(spotLight);
             mesh.add(spotLight.target);
-            spotLight.target.position.set(0, -10, 0); 
+            // 讓 target 在更下方，確保投影方向垂直向下
+            spotLight.target.position.set(0, -5, 0); 
         }
+        // ------------------
 
-        // ... 後續門與碰撞物邏輯不變 ...
+        if (name.includes("door")) interactiveDoors.push(mesh);
+        if (name.includes("wall") || (name.includes("door") && !name.includes("locker"))) {
+            collidableObjects.push(mesh);
+        }
     });
 });
 

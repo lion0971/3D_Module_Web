@@ -153,17 +153,14 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
         const name = mesh.name.toLowerCase();
 
         if (name.includes("bulb")) {
-            const lightColor = 0xfff5d7; // 統一暖白光
-            
-                        // 1. 修改燈泡材質為強大的自發光實體
-                        if (mesh.material) {
-                            mesh.material = new THREE.MeshStandardMaterial({
-                                color: 0x666666,        // [調暗] 基礎顏色，避免本體過白
-                                emissive: new THREE.Color(lightColor),
-                                emissiveIntensity: 50.0, // [降低] 從 15~20 降到 5.0，配合 Bloom 的新參數
-                                toneMapped: true        // [改回 true] 讓它受曝光度控制，避免直接爆白
-                            });
-                        }
+            console.log("找到燈泡/燈座模型:", mesh.name);
+
+            // 1. 關閉模型自發光 (保留原本的修正)
+            if (mesh.material) {
+                mesh.material.emissive = new THREE.Color(0x000000); 
+                mesh.material.emissiveIntensity = 0; 
+                if (mesh.material.map) mesh.material.color.setHex(0x333333); 
+            }
 
             // 2. [新的氛圍光體] 柔和圓錐體模型
             const vConeLight = createConeVolumetricLight(0xfff5d7);
