@@ -14,7 +14,7 @@ let moveForward = false, moveBackward = false, moveLeft = false, moveRight = fal
 let prevTime = performance.now();
 const velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
-let movingLightGroup = [];
+let movingLightGroup = []; 
 
 // --- 1. 場景基礎設置 ---
 const scene = new THREE.Scene();
@@ -32,7 +32,7 @@ document.body.appendChild(renderer.domElement);
 // --- 2. 後處理 ---
 let composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.1, 0.3, 0.8);//0.4Strength, 0.1光暈半徑，0.6閥值
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.4, 0.1, 0.9);
 composer.addPass(bloomPass);
 
 const labelRenderer = new CSS2DRenderer();
@@ -69,7 +69,7 @@ manager.onProgress = (url, itemsLoaded, itemsTotal) => {
 manager.onError = (url) => {
     console.error('載入出錯的檔案:', url);
     // 即使出錯，5秒後也強制進入，避免使用者一直看著黑畫面
-    setTimeout(hideLoadingScreen, 2000);
+    setTimeout(hideLoadingScreen, 2000); 
 };
 
 const dracoLoader = new DRACOLoader();
@@ -96,22 +96,22 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
             mesh.material = new THREE.MeshStandardMaterial({
                 color: 0xffe28a,
                 emissive: new THREE.Color(lightColor),
-                emissiveIntensity: 10,
+                emissiveIntensity: 1.5,
                 toneMapped: true
             });
 
             // 圓錐光束
             const vCone = createConeVolumetricLight(lightColor);
-            vCone.position.set(0, 0.1, 0.2);
+            vCone.position.set(0, 0.1, 0); 
             mesh.add(vCone);
 
             // 聚光燈
-            const spotLight = new THREE.SpotLight(lightColor, 3, 20, Math.PI / 6, 0.5, 2);//3光照強度，12照射距離，擴散角度，半影區（邊緣柔和度）_數值介於 0 到 1 之間，2光線隨距離平方反比衰減，最符合現實世界的物理規律
-            spotLight.position.set(0, -0.1, 0.4);
+            const spotLight = new THREE.SpotLight(lightColor, 3, 12, Math.PI / 6, 0.5, 2);
+            spotLight.position.set(0, 0.1, 0); 
             mesh.add(spotLight);
-
+            
             const targetObject = new THREE.Object3D();
-            targetObject.position.set(0, -1, 0);
+            targetObject.position.set(0, -1, 0); 
             mesh.add(targetObject);
             spotLight.target = targetObject;
 
@@ -125,12 +125,10 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
 
 // --- 5. 圓錐生成函式 ---
 function createConeVolumetricLight(color) {
-    const h = 60;
-    const baseRadius = 33;
-    const geometry = new THREE.ConeGeometry(baseRadius, h, 32, 1, true);//高度，側邊分段數（精細度），沿圓錐高度方向要切成多少段，是否開口（不封底）
-
-    // 將幾何體中心下移，使圓錐頂點位於 (0,0,0)
-    geometry.translate(0, -h / 2, 0);
+    const h = 2.5; 
+    const baseRadius = 0.35; 
+    const geometry = new THREE.ConeGeometry(baseRadius, h, 32, 1, true);
+    geometry.translate(0, -h / 2, 0); 
 
     const material = new THREE.ShaderMaterial({
         uniforms: {
@@ -139,10 +137,8 @@ function createConeVolumetricLight(color) {
         },
         vertexShader: `
             varying float vY;
-            varying vec3 vNormal;
             void main() {
                 vY = position.y; 
-                vNormal = normalize(normalMatrix * normal);
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
             }
         `,
@@ -150,37 +146,18 @@ function createConeVolumetricLight(color) {
             uniform vec3 uColor;
             uniform float uHeight;
             varying float vY;
-            varying vec3 vNormal;
-
             void main() {
-    // 1. 垂直漸變
-    float yNorm = 1.0 - (vY / -uHeight);
-    float verticalFade = smoothstep(0.0, 0.4, yNorm); 
-
-    // 2. 邊緣與中心透明度控制
-    // 雖然整體調暗了，但中心保底值可以稍微拉高到 0.5，確保上半部顏色紮實
-    float minOpacity = 0.5; 
-    float opacityMultiplier = 0.25; // 這是你的「總亮度旋鈕」
-    
-    // 增加邊緣衰減，讓側面極其柔和
-    float fresnel = pow(1.0 - abs(vNormal.z), 4.0); 
-    
-    // 3. 混合計算
-    // 使用 minOpacity 確保光束中心不是空的
-    float combinedShape = (minOpacity + fresnel); 
-    
-    // 最終合成：verticalFade(高度) * combinedShape(橫切面) * 總量控制
-    float finalAlpha = verticalFade * combinedShape * opacityMultiplier;
-    
-    gl_FragColor = vec4(uColor, finalAlpha);
-}
+                float verticalFade = smoothstep(0.0, -0.15, vY) * 
+                                   smoothstep(-uHeight, -uHeight + 0.8, vY);
+                float alpha = 0.35 * verticalFade; 
+                gl_FragColor = vec4(uColor, alpha);
+            }
         `,
         transparent: true,
-        depthWrite: false, // 必須為 false，否則會遮擋後方物體
-        blending: THREE.NormalBlending,// 疊加模式，增加發光感
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide
     });
-
     return new THREE.Mesh(geometry, material);
 }
 

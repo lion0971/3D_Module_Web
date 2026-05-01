@@ -12,7 +12,7 @@ export const CONFIG = {
     },
    CAMERA: {
         fov: 60,
-        startPos: { x: 20, y: 1.5, z: 4 },
+        startPos: { x: 2.4, y: 1.5, z: -3 },
         lookAtPos: { x: 0, y: 1.5, z: 0 } // 明確定義看向中心
     }
 };
