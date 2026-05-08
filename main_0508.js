@@ -38,7 +38,6 @@ class WaterFlow {
         this.emitPosition = emitPosition.clone();
         this.type         = type;
         this.active       = false;
-        //this.count = 400; // 統一增加粒子數量
         this.count        = type === 'shower' ? 400 : 200;
         this.velocities   = [];
         this.lifetimes    = [];
@@ -68,7 +67,7 @@ class WaterFlow {
         geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
 
         const mat = new THREE.PointsMaterial({
-            size: this.type === 'shower' ? 0.025 : 0.035,// 縮小 faucet 粒子尺寸
+            size: this.type === 'shower' ? 0.025 : 0.035,
             vertexColors: true,
             transparent: true,
             opacity: 0.85,
@@ -83,11 +82,11 @@ class WaterFlow {
     }
 
     _resetVelocity(i) {
-        if (this.type === 'faucet') {//faucet 的水平發散速度
+        if (this.type === 'faucet') {
             this.velocities[i] = new THREE.Vector3(
-                (Math.random() - 0.5) * 0.02,
+                (Math.random() - 0.5) * 0.008,
                 -(0.04 + Math.random() * 0.025),
-                (Math.random() - 0.5) * 0.02
+                (Math.random() - 0.5) * 0.008
             );
         } else {
             const angle  = Math.random() * Math.PI * 2;
@@ -101,7 +100,7 @@ class WaterFlow {
     }
 
     _resetParticle(i) {
-        const jitter = this.type === 'shower' ? 0.015 : 0.01;//重啟時加入的抖動量
+        const jitter = this.type === 'shower' ? 0.015 : 0.005;
         this.positions[i*3]   = this.emitPosition.x + (Math.random()-0.5)*jitter;
         this.positions[i*3+1] = this.emitPosition.y;
         this.positions[i*3+2] = this.emitPosition.z + (Math.random()-0.5)*jitter;
@@ -117,7 +116,7 @@ class WaterFlow {
     update(delta) {
         if (!this.active) return;
         const gravity = -0.003;
-        const maxLife = this.type === 'faucet' ? 0.8 : 0.9;//faucet 的生存時間
+        const maxLife = this.type === 'faucet' ? 1.5 : 0.9;
 
         for (let i = 0; i < this.count; i++) {
             this.lifetimes[i] += delta;
