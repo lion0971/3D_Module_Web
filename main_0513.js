@@ -353,40 +353,16 @@ xrayBtn.onclick = () => {
 uiContainer.appendChild(xrayBtn);
 
 function toggleXRayMode(enable) {
-    // ✅ 用 Set 追蹤「這次已處理過的材質實例」
-    const processedMaterials = new Set();
-
     scene.traverse((obj) => {
         if (!obj.isMesh) return;
-
         const name     = obj.name.toLowerCase();
         const isPipe   = name.includes('measure') || name.includes('pipe');
         const isDevice = interactiveDevices.includes(obj) || name.includes('bulb');
-        if (isPipe || isDevice) return;
-
-        const mat = obj.material;
-
-        // ✅ 同一個材質實例只處理一次，避免共用材質被重複覆寫
-        if (processedMaterials.has(mat)) return;
-        processedMaterials.add(mat);
-
-        if (enable) {
-            // ✅ 存在 material.userData（材質層級），不是 mesh.userData
-            mat.userData._origOpacity     = mat.opacity;
-            mat.userData._origTransparent = mat.transparent;
-            mat.userData._origDepthWrite  = mat.depthWrite;
-
-            mat.transparent = true;
-            mat.opacity     = 0.15;
-            mat.depthWrite  = false;
-        } else {
-            // ✅ 從材質自身還原，保證是開啟前的正確值
-            mat.opacity     = mat.userData._origOpacity     ?? 1.0;
-            mat.transparent = mat.userData._origTransparent ?? false;
-            mat.depthWrite  = mat.userData._origDepthWrite  ?? true;
+        if (!isPipe && !isDevice) {
+            obj.material.transparent = true;
+            obj.material.opacity     = enable ? 0.15 : 1.0;
+            obj.material.depthWrite  = !enable;
         }
-
-        mat.needsUpdate = true; // 通知 Three.js 重新編譯材質
     });
 }
 
@@ -425,18 +401,14 @@ renderer.domElement.addEventListener('click', () => {
         }
     }
 
-    // ✅ 只看「設備管路」，不讓 measure_total 自己影響自己
-let anyActive = false;
-flowingPipes.forEach((p, key) => {
-    if (key !== 'measure_total' && p.active) anyActive = true;
-});
-
-const total = flowingPipes.get('measure_total');
-if (total) {
-    total.active = anyActive;
-    total.mesh.material.opacity = anyActive ? 0.6 : 0.05;
-    if (!anyActive) total.mesh.material.emissiveIntensity = 0;
-}
+    let anyActive = false;
+    flowingPipes.forEach(p => { if (p.active) anyActive = true; });
+    const total = flowingPipes.get('measure_total');
+    if (total) {
+        total.active = anyActive;
+        total.mesh.material.opacity = anyActive ? 0.6 : 0.05;
+        if (!anyActive) total.mesh.material.emissiveIntensity = 0;
+    }
 });
 
 document.addEventListener('keydown', (e) => {
@@ -464,15 +436,10 @@ function animate() {
     for (const key in waterFlows) waterFlows[key].update(delta);
 
     // 管路 emissive 波動
-flowingPipes.forEach((p) => {
-    if (!p.mesh.material) return;
-    if (p.active) {
-        p.mesh.material.emissiveIntensity = 0.6 + Math.sin(time * 10) * 0.4;
-    } else {
-        // ✅ 非 active 的管路確保 emissive 歸零（包含 measure_total）
-        p.mesh.material.emissiveIntensity = 0;
-    }
-});
+    flowingPipes.forEach((p) => {
+        if (p.active && p.mesh.material)
+            p.mesh.material.emissiveIntensity = 0.6 + Math.sin(time * 10) * 0.4;
+    });
 
     // 計時器 UI
     for (const key in activeTimers) {

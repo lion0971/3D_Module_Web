@@ -425,18 +425,14 @@ renderer.domElement.addEventListener('click', () => {
         }
     }
 
-    // ✅ 只看「設備管路」，不讓 measure_total 自己影響自己
-let anyActive = false;
-flowingPipes.forEach((p, key) => {
-    if (key !== 'measure_total' && p.active) anyActive = true;
-});
-
-const total = flowingPipes.get('measure_total');
-if (total) {
-    total.active = anyActive;
-    total.mesh.material.opacity = anyActive ? 0.6 : 0.05;
-    if (!anyActive) total.mesh.material.emissiveIntensity = 0;
-}
+    let anyActive = false;
+    flowingPipes.forEach(p => { if (p.active) anyActive = true; });
+    const total = flowingPipes.get('measure_total');
+    if (total) {
+        total.active = anyActive;
+        total.mesh.material.opacity = anyActive ? 0.6 : 0.05;
+        if (!anyActive) total.mesh.material.emissiveIntensity = 0;
+    }
 });
 
 document.addEventListener('keydown', (e) => {
@@ -464,15 +460,10 @@ function animate() {
     for (const key in waterFlows) waterFlows[key].update(delta);
 
     // 管路 emissive 波動
-flowingPipes.forEach((p) => {
-    if (!p.mesh.material) return;
-    if (p.active) {
-        p.mesh.material.emissiveIntensity = 0.6 + Math.sin(time * 10) * 0.4;
-    } else {
-        // ✅ 非 active 的管路確保 emissive 歸零（包含 measure_total）
-        p.mesh.material.emissiveIntensity = 0;
-    }
-});
+    flowingPipes.forEach((p) => {
+        if (p.active && p.mesh.material)
+            p.mesh.material.emissiveIntensity = 0.6 + Math.sin(time * 10) * 0.4;
+    });
 
     // 計時器 UI
     for (const key in activeTimers) {
