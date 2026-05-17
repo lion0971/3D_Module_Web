@@ -146,16 +146,13 @@ class DrainFlow {
      * @param {THREE.Vector3} drainPosition  排水球體的世界座標
      * @param {number} radius                螺旋初始半徑（建議 0.1~0.3）
      */
-    constructor(scene, drainPosition, radius = 0.32) {
+    constructor(scene, drainPosition, radius = 0.25) {
         this.scene = scene;
         this.drainPosition = drainPosition.clone();
         this.radius = radius;
         this.active = false;
         this.count = 280;
-        this.particles = [];
-        this.fadeOpacity = 0;       // 新增：當前淡入透明度
-        this.fadeDuration = 3.0;    // 新增：淡入秒數（可自行調整）
-        this.fadeElapsed = 0;       // 新增：已經過的秒數
+        this.particles = [];   // { r, angle, y, angularSpeed, fallSpeed }
         this._build();
     }
 
@@ -230,30 +227,26 @@ class DrainFlow {
     setActive(isActive) {
         this.active = isActive;
         this.points.visible = isActive;
-        if (isActive) {
-            this.fadeOpacity = 0;
-            this.fadeElapsed = 0;
-        }
     }
 
     update(delta) {
         if (!this.active) return;
 
-        // ── 淡入計算 ──
-        this.fadeElapsed += delta;
-        this.fadeOpacity = Math.min(this.fadeElapsed / this.fadeDuration, 1.0);
-
         for (let i = 0; i < this.count; i++) {
             const p = this.particles[i];
 
-            const angularMult = Math.pow(this.radius / (p.r + 0.008), 1.8);
+            // ── 角速度隨半徑縮小而加快（模擬角動量守恆）──
+            const angularMult = this.radius / (p.r + 0.008);
             p.angle += p.angularSpeed * angularMult * delta;
 
+            // ── 向心收縮：越靠近中心收得越快 ──
             const pullStrength = 0.06 + (this.radius - p.r) * 0.4;
             p.r -= pullStrength * delta;
 
+            // ── 向下掉落 ──
             p.y -= p.fallSpeed * delta;
 
+            // ── 到達中心或掉出球體下方時重置 ──
             if (p.r < 0.006 || p.y < -0.002) {
                 this._initParticle(i, false);
             } else {
@@ -263,9 +256,9 @@ class DrainFlow {
 
         this.points.geometry.attributes.position.needsUpdate = true;
 
-        // ── opacity 結合淡入與閃爍 ──
-        const flicker = 0.72 + Math.sin(performance.now() * 0.005) * 0.16;
-        this.points.material.opacity = flicker * this.fadeOpacity;
+        // 輕微閃爍讓水面看起來有流動感
+        this.points.material.opacity =
+            0.72 + Math.sin(performance.now() * 0.005) * 0.16;
     }
 
     dispose() {
@@ -442,7 +435,7 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
 
     // ── 第二遍：處理 mesh ─────────────────────────────────────
 
-
+    
     gltf.scene.traverse((mesh) => {
         if (!mesh.isMesh) return;
         const name = mesh.name.toLowerCase();
