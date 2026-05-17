@@ -434,13 +434,9 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
     });
 
     // ── 第二遍：處理 mesh ─────────────────────────────────────
-
-    
     gltf.scene.traverse((mesh) => {
         if (!mesh.isMesh) return;
         const name = mesh.name.toLowerCase();
-
-        if (name.includes('drain')) console.log(`[Debug] drain mesh 名稱: "${name}"`);
 
         // 燈泡
         if (name.includes('bulb')) {
@@ -463,7 +459,7 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
 
         if (/^(faucet|shower)(_\d+)?$/.test(name)) {
             interactiveDevices.push(mesh);
-            activeTimers[name] = { startTime: null, alerted: false };
+            activeTimers[name] = { startTime: null, alerted: false }; // 動態建立計時器
             console.log(`[Device] ${name}`);
         }
 
@@ -490,7 +486,7 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
         }
 
         // ✅ 排水口 sphere：drain / drain_2 / drain_3 ...
-        if (/^drain_(faucet|shower)(_\d+)?$/.test(name)) {
+        if (/^drain(_\d+)?$/.test(name)) {
             const worldPos = new THREE.Vector3();
             mesh.getWorldPosition(worldPos);
 
@@ -721,11 +717,13 @@ renderer.domElement.addEventListener('click', () => {
     }
 
     // ── 在 pipe.active 切換後，同步對應的 drain 漩渦 ──
-    // 'faucet' → 'drain_faucet'，'shower_2' → 'drain_shower_2'
-    const drainKey = `drain_${targetName}`;
+    // 取出裝置編號，例如 'faucet_2' → '_2'，'faucet' → ''
+    const suffix = targetName.replace(/^(faucet|shower)/, ''); // '' | '_2' | '_3'
+    const drainKey = `drain${suffix}`;                           // 'drain' | 'drain_2'
 
     if (drainFlows[drainKey]) {
         drainFlows[drainKey].setActive(pipe?.active ?? false);
+        console.log(`[Drain] ${drainKey} → ${pipe?.active ? 'ON' : 'OFF'}`);
     }
 });
 
