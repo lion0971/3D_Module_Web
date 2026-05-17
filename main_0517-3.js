@@ -29,14 +29,6 @@ const activeTimers = {};
 
 const drainFlows = {};   // DrainFlow 實例，key 為 drain 物件名稱
 
-const DEVICE_LABEL = {
-    'faucet': '洗手台水龍頭',
-    'faucet_2': '浴缸水龍頭',
-    'shower': '淋浴蓮蓬頭',
-    'shower_2': '浴缸蓮蓬頭',
-    // 依實際場景命名增加
-};
-
 // ─────────────────────────────────────────
 // 二、水流粒子系統
 // ─────────────────────────────────────────
@@ -641,100 +633,21 @@ warningCloseBtn.onclick = () => {
 };
 warningModal.appendChild(warningCloseBtn);
 
-const warningOffBtn = document.createElement('button');
-warningOffBtn.innerText = '關閉水流';
-Object.assign(warningOffBtn.style, {
-    padding: '8px 24px',
-    cursor: 'pointer',
-    background: '#c03000',
-    color: 'white',
-    border: 'none',
-    borderRadius: '6px',
-    fontWeight: 'bold',
-    fontSize: '15px',
-    display: 'block',
-    margin: '10px auto 0',
-});
-warningOffBtn.onclick = () => {
-    const deviceName = warningOffBtn.dataset.device;
-
-    // ── 關冷水管 ──
-    const pipe = flowingPipes.get(`pipe_${deviceName}`);
-    if (pipe) {
-        pipe.active = false;
-        pipe.mesh.material.opacity = 0.05;
-        pipe.mesh.material.emissiveIntensity = 0;
-        waterFlows[deviceName]?.setActive(false);
-    }
-
-    // ── 關熱水管 ──
-    const hotPipe = flowingPipes.get(`pipe_${deviceName}_w`);
-    if (hotPipe) {
-        hotPipe.active = false;
-        hotPipe.mesh.material.opacity = 0.05;
-        hotPipe.mesh.material.emissiveIntensity = 0;
-    }
-
-    // ── 關排水漩渦 ──
-    const drainKey = `drain_${deviceName}`;
-    drainFlows[drainKey]?.setActive(false);
-
-    // ── 重設計時器 ──
-    if (activeTimers[deviceName]) {
-        activeTimers[deviceName].startTime = null;
-        activeTimers[deviceName].alerted = false;
-    }
-
-    // ── 同步幹管 ──
-    let anyActive = false;
-    flowingPipes.forEach((p, key) => {
-        if (key !== 'pipe_restroom' && key !== 'pipe_restroom_w' && !key.endsWith('_w') && p.active) {
-            anyActive = true;
-        }
-    });
-    const total = flowingPipes.get('pipe_restroom');
-    if (total) {
-        total.active = anyActive;
-        total.mesh.material.opacity = anyActive ? 0.6 : 0.05;
-        total.mesh.material.emissiveIntensity = anyActive ? undefined : 0;
-    }
-
-    let anyHotActive = false;
-    flowingPipes.forEach((p, key) => {
-        if (key.endsWith('_w') && key !== 'pipe_restroom_w' && p.active) anyHotActive = true;
-    });
-    const totalHot = flowingPipes.get('pipe_restroom_w');
-    if (totalHot) {
-        totalHot.active = anyHotActive;
-        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : 0.05;
-        totalHot.mesh.material.emissiveIntensity = anyHotActive ? undefined : 0;
-    }
-
-    warningModal.style.display = 'none';
-    controls.lock();
-};
-warningModal.appendChild(warningOffBtn);
-
 /**
  * 顯示出水超時警告
  * @param {string} deviceName 完整裝置名稱，如 'faucet', 'faucet_2', 'shower_2'
  */
 function showWarning(deviceName) {
-    const label = DEVICE_LABEL[deviceName] ?? deviceName;
+    const type = getDeviceType(deviceName);
+    const label = type === 'faucet' ? '水龍頭' : '蓮蓬頭';
+    // 有編號時附加顯示，如 faucet_2 → 水龍頭 #2
+    const numMatch = deviceName.match(/_(\d+)$/);
+    const numStr = numMatch ? ` #${numMatch[1]}` : '';
 
     warningText.innerHTML =
-        `⚠️ 警告<br>
-        <span style="color:#ffdd00;font-size:22px">${label}</span><br>
-        已持續出水超過 <span style="color:#ffdd00">1 分鐘</span>！<br>
-        請確認是否忘記關閉。`;
-
+        `⚠️ 警告<br>${label}${numStr} 已持續出水超過 <span style="color:#ffdd00">1 分鐘</span>！<br>請確認是否忘記關閉。`;
     warningModal.style.display = 'block';
-
-    // 把裝置名稱存在按鈕上，讓關閉按鈕知道要關哪個
-    warningCloseBtn.dataset.device = deviceName;
-    warningOffBtn.dataset.device = deviceName;
-
-    controls.unlock();
+    controls.unlock(); // 解鎖滑鼠，讓按鈕可被點擊
 }
 
 // ─────────────────────────────────────────
