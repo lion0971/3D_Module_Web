@@ -585,60 +585,33 @@ Object.assign(xrayBtn.style, {
     fontSize: '15px',
     width: '100%',
 });
-xrayBtn.onclick = (e) => {
-    e.stopPropagation();   // 阻止事件冒泡
+xrayBtn.onclick = () => {
     isXRayMode = !isXRayMode;
     xrayBtn.innerText = isXRayMode ? '關閉管路透視模式' : '開啟管路透視模式';
     xrayBtn.style.background = isXRayMode
         ? 'rgba(0,255,255,0.5)'
         : 'rgba(0,255,255,0.2)';
     toggleXRayMode(isXRayMode);
-    closeMenu();
 };
 menuPanel.appendChild(xrayBtn);
 
 // ── 面板開關函式 ──
 function openMenu() {
-    if (controls.isLocked) controls.unlock();  // 只在鎖定時才解鎖
     menuPanel.style.display = 'flex';
 }
-
 function closeMenu() {
     menuPanel.style.display = 'none';
-    setTimeout(() => controls.lock(), 80);
-}
-
-// ── 補回這個函式 ──
-function toggleXRayMode(enable) {
-    const processedMaterials = new Set();
-    scene.traverse((obj) => {
-        if (!obj.isMesh) return;
-        const name = obj.name.toLowerCase();
-        const isPipe = name.includes('measure') || name.includes('pipe');
-        const isDevice = interactiveDevices.includes(obj) || name.includes('bulb');
-        if (isPipe || isDevice) return;
-        const mat = obj.material;
-        if (processedMaterials.has(mat)) return;
-        processedMaterials.add(mat);
-        if (enable) {
-            mat.userData._origOpacity = mat.opacity;
-            mat.userData._origTransparent = mat.transparent;
-            mat.userData._origDepthWrite = mat.depthWrite;
-            mat.transparent = true;
-            mat.opacity = 0.15;
-            mat.depthWrite = false;
-        } else {
-            mat.opacity = mat.userData._origOpacity ?? 1.0;
-            mat.transparent = mat.userData._origTransparent ?? false;
-            mat.depthWrite = mat.userData._origDepthWrite ?? true;
-        }
-        mat.needsUpdate = true;
-    });
+    controls.lock();
 }
 
 // ── 右鍵開選單 ──
 // 取代原本的 contextmenu 監聽
-renderer.domElement.addEventListener('dblclick', () => {
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault()); // 只阻止預設選單
+
+renderer.domElement.addEventListener('mousedown', (e) => {
+    if (e.button !== 2) return;  // 只處理右鍵
+    e.preventDefault();
+    controls.unlock();
     openMenu();
 });
 
@@ -686,13 +659,13 @@ Object.assign(warningCloseBtn.style, {
 warningCloseBtn.onclick = () => {
     warningModal.style.display = 'none';
     for (const key in activeTimers) {
-        if (activeTimers[key].startTime) activeTimers[key].startTime = Date.now();
+        // 若裝置仍在出水，重設起始時間，讓下次警告在 60 秒後才再觸發
+        if (activeTimers[key].startTime) {
+            activeTimers[key].startTime = Date.now();
+        }
         activeTimers[key].alerted = false;
     }
-    // 選單仍開著就不鎖定，讓游標保持可見
-    if (menuPanel.style.display !== 'flex') {
-        setTimeout(() => controls.lock(), 80);
-    }
+    controls.lock();
 };
 warningModal.appendChild(warningCloseBtn);
 
@@ -766,9 +739,7 @@ warningOffBtn.onclick = () => {
     }
 
     warningModal.style.display = 'none';
-    if (menuPanel.style.display !== 'flex') {
-        setTimeout(() => controls.lock(), 80);
-    }
+    controls.lock();
 };
 warningModal.appendChild(warningOffBtn);
 

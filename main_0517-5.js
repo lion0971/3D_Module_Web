@@ -536,90 +536,41 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
 // ─────────────────────────────────────────
 // 七、UI
 // ─────────────────────────────────────────
-// ─────────────────────────────────────────
-// 七、UI
-// ─────────────────────────────────────────
-
-// ── 中央選單面板 ──
-const menuPanel = document.createElement('div');
-Object.assign(menuPanel.style, {
-    display: 'none',
-    position: 'fixed',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    background: 'rgba(0, 0, 0, 0.75)',
-    backdropFilter: 'blur(8px)',
-    border: '1px solid rgba(0,255,255,0.4)',
-    borderRadius: '12px',
-    padding: '24px 36px',
-    zIndex: '200',
-    display: 'none',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '12px',
-    minWidth: '220px',
-    pointerEvents: 'auto',
-});
-document.body.appendChild(menuPanel);
-
-const menuTitle = document.createElement('div');
-menuTitle.innerText = '選單';
-Object.assign(menuTitle.style, {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: '13px',
-    marginBottom: '4px',
-    letterSpacing: '2px',
-});
-menuPanel.appendChild(menuTitle);
+const uiContainer = document.createElement('div');
+Object.assign(uiContainer.style, { position: 'absolute', top: '20px', left: '20px', zIndex: '100' });
+document.body.appendChild(uiContainer);
 
 const xrayBtn = document.createElement('button');
 xrayBtn.innerText = '開啟管路透視模式';
 Object.assign(xrayBtn.style, {
     padding: '10px 20px',
     cursor: 'pointer',
-    background: 'rgba(0,255,255,0.2)',
+    background: 'rgba(0,255,255,0.3)',
     color: 'white',
-    border: '1px solid cyan',
-    borderRadius: '6px',
-    fontSize: '15px',
-    width: '100%',
+    border: '1px solid cyan'
 });
-xrayBtn.onclick = (e) => {
-    e.stopPropagation();   // 阻止事件冒泡
+xrayBtn.onclick = () => {
     isXRayMode = !isXRayMode;
     xrayBtn.innerText = isXRayMode ? '關閉管路透視模式' : '開啟管路透視模式';
-    xrayBtn.style.background = isXRayMode
-        ? 'rgba(0,255,255,0.5)'
-        : 'rgba(0,255,255,0.2)';
     toggleXRayMode(isXRayMode);
-    closeMenu();
 };
-menuPanel.appendChild(xrayBtn);
+uiContainer.appendChild(xrayBtn);
 
-// ── 面板開關函式 ──
-function openMenu() {
-    if (controls.isLocked) controls.unlock();  // 只在鎖定時才解鎖
-    menuPanel.style.display = 'flex';
-}
-
-function closeMenu() {
-    menuPanel.style.display = 'none';
-    setTimeout(() => controls.lock(), 80);
-}
-
-// ── 補回這個函式 ──
 function toggleXRayMode(enable) {
     const processedMaterials = new Set();
+
     scene.traverse((obj) => {
         if (!obj.isMesh) return;
+
         const name = obj.name.toLowerCase();
         const isPipe = name.includes('measure') || name.includes('pipe');
         const isDevice = interactiveDevices.includes(obj) || name.includes('bulb');
         if (isPipe || isDevice) return;
+
         const mat = obj.material;
         if (processedMaterials.has(mat)) return;
         processedMaterials.add(mat);
+
         if (enable) {
             mat.userData._origOpacity = mat.opacity;
             mat.userData._origTransparent = mat.transparent;
@@ -635,12 +586,6 @@ function toggleXRayMode(enable) {
         mat.needsUpdate = true;
     });
 }
-
-// ── 右鍵開選單 ──
-// 取代原本的 contextmenu 監聽
-renderer.domElement.addEventListener('dblclick', () => {
-    openMenu();
-});
 
 // ── 警告彈窗 ──────────────────────────────────────────────────
 const warningModal = document.createElement('div');
@@ -686,13 +631,13 @@ Object.assign(warningCloseBtn.style, {
 warningCloseBtn.onclick = () => {
     warningModal.style.display = 'none';
     for (const key in activeTimers) {
-        if (activeTimers[key].startTime) activeTimers[key].startTime = Date.now();
+        // 若裝置仍在出水，重設起始時間，讓下次警告在 60 秒後才再觸發
+        if (activeTimers[key].startTime) {
+            activeTimers[key].startTime = Date.now();
+        }
         activeTimers[key].alerted = false;
     }
-    // 選單仍開著就不鎖定，讓游標保持可見
-    if (menuPanel.style.display !== 'flex') {
-        setTimeout(() => controls.lock(), 80);
-    }
+    controls.lock();
 };
 warningModal.appendChild(warningCloseBtn);
 
@@ -766,9 +711,7 @@ warningOffBtn.onclick = () => {
     }
 
     warningModal.style.display = 'none';
-    if (menuPanel.style.display !== 'flex') {
-        setTimeout(() => controls.lock(), 80);
-    }
+    controls.lock();
 };
 warningModal.appendChild(warningOffBtn);
 
@@ -800,19 +743,8 @@ function showWarning(deviceName) {
 const controls = new PointerLockControls(camera, renderer.domElement);
 
 renderer.domElement.addEventListener('click', () => {
-    // 選單開著 → 左鍵關選單
-    if (menuPanel.style.display === 'flex') {
-        closeMenu();
-        return;
-    }
+    if (!controls.isLocked) { controls.lock(); return; }
 
-    // 未鎖定 → 左鍵鎖定，不做其他事
-    if (!controls.isLocked) {
-        controls.lock();
-        return;
-    }
-
-    // 已鎖定 → 正常 raycaster 互動
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     const intersects = raycaster.intersectObjects(interactiveDevices);
     if (!intersects.length) return;
