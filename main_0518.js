@@ -24,11 +24,6 @@ const outletObjects = {};   // faucet_outlet / faucet_2_outlet / shower_outlet /
 const waterFlows = {};      // WaterFlow 實例，key 為完整裝置名稱
 let isXRayMode = false;
 
-/** 依目前模式回傳管路「非啟動」狀態的透明度 */
-function getInactivePipeOpacity() {
-    return isXRayMode ? 0.45 : 0.05;
-};
-
 // ✅ 動態建立，traverse 時自動新增 key（支援多個裝置）
 const activeTimers = {};
 
@@ -621,22 +616,10 @@ function toggleXRayMode(enable) {
         const name = obj.name.toLowerCase();
         const isPipe = name.includes('measure') || name.includes('pipe');
         const isDevice = interactiveDevices.includes(obj) || name.includes('bulb');
-        if (isDevice) return;
-
+        if (isPipe || isDevice) return;
         const mat = obj.material;
         if (processedMaterials.has(mat)) return;
         processedMaterials.add(mat);
-
-        // ── 管路：只調整「目前未啟動」的管路，啟動中的保持 0.75 不動 ──
-        if (isPipe) {
-            const pipeEntry = flowingPipes.get(name);
-            if (pipeEntry && !pipeEntry.active) {
-                mat.opacity = enable ? 0.45 : 0.05;
-                mat.needsUpdate = true;
-            }
-            return;
-        }
-
         if (enable) {
             mat.userData._origOpacity = mat.opacity;
             mat.userData._origTransparent = mat.transparent;
@@ -734,7 +717,7 @@ warningOffBtn.onclick = () => {
     const pipe = flowingPipes.get(`pipe_${deviceName}`);
     if (pipe) {
         pipe.active = false;
-        pipe.mesh.material.opacity     = getInactivePipeOpacity();
+        pipe.mesh.material.opacity = 0.05;
         pipe.mesh.material.emissiveIntensity = 0;
         waterFlows[deviceName]?.setActive(false);
     }
@@ -743,7 +726,7 @@ warningOffBtn.onclick = () => {
     const hotPipe = flowingPipes.get(`pipe_${deviceName}_w`);
     if (hotPipe) {
         hotPipe.active = false;
-        pipe.mesh.material.opacity     = getInactivePipeOpacity();
+        hotPipe.mesh.material.opacity = 0.05;
         hotPipe.mesh.material.emissiveIntensity = 0;
     }
 
@@ -767,7 +750,7 @@ warningOffBtn.onclick = () => {
     const total = flowingPipes.get('pipe_restroom');
     if (total) {
         total.active = anyActive;
-        total.mesh.material.opacity    = anyActive    ? 0.6 : getInactivePipeOpacity();
+        total.mesh.material.opacity = anyActive ? 0.6 : 0.05;
         total.mesh.material.emissiveIntensity = anyActive ? undefined : 0;
     }
 
@@ -778,7 +761,7 @@ warningOffBtn.onclick = () => {
     const totalHot = flowingPipes.get('pipe_restroom_w');
     if (totalHot) {
         totalHot.active = anyHotActive;
-        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : getInactivePipeOpacity();
+        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : 0.05;
         totalHot.mesh.material.emissiveIntensity = anyHotActive ? undefined : 0;
     }
 
@@ -844,7 +827,7 @@ renderer.domElement.addEventListener('click', () => {
     if (pipe) {
         pipe.active = !pipe.active;
         waterFlows[targetName]?.setActive(pipe.active);
-        pipe.mesh.material.opacity    = pipe.active    ? 0.75 : getInactivePipeOpacity();
+        pipe.mesh.material.opacity = pipe.active ? 0.75 : 0.05;
         if (!pipe.active) pipe.mesh.material.emissiveIntensity = 0;
 
         // 計時器
@@ -865,7 +848,7 @@ renderer.domElement.addEventListener('click', () => {
 
     if (hotPipe) {
         hotPipe.active = isNowActive;
-        hotPipe.mesh.material.opacity = isNowActive    ? 0.75 : getInactivePipeOpacity();
+        hotPipe.mesh.material.opacity = isNowActive ? 0.75 : 0.05;
         if (!isNowActive) hotPipe.mesh.material.emissiveIntensity = 0;
     }
 
@@ -880,7 +863,7 @@ renderer.domElement.addEventListener('click', () => {
     const total = flowingPipes.get('pipe_restroom');
     if (total) {
         total.active = anyActive;
-        total.mesh.material.opacity   = anyActive      ? 0.6  : getInactivePipeOpacity();
+        total.mesh.material.opacity = anyActive ? 0.6 : 0.05;
         if (!anyActive) total.mesh.material.emissiveIntensity = 0;
     }
 
@@ -895,7 +878,7 @@ renderer.domElement.addEventListener('click', () => {
     const totalHot = flowingPipes.get('pipe_restroom_w');
     if (totalHot) {
         totalHot.active = anyHotActive;
-        totalHot.mesh.material.opacity = anyHotActive  ? 0.6  : getInactivePipeOpacity();
+        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : 0.05;
         if (!anyHotActive) totalHot.mesh.material.emissiveIntensity = 0;
     }
 

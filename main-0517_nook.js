@@ -24,11 +24,6 @@ const outletObjects = {};   // faucet_outlet / faucet_2_outlet / shower_outlet /
 const waterFlows = {};      // WaterFlow 實例，key 為完整裝置名稱
 let isXRayMode = false;
 
-/** 依目前模式回傳管路「非啟動」狀態的透明度 */
-function getInactivePipeOpacity() {
-    return isXRayMode ? 0.45 : 0.05;
-};
-
 // ✅ 動態建立，traverse 時自動新增 key（支援多個裝置）
 const activeTimers = {};
 
@@ -333,6 +328,10 @@ function getDeviceType(name) {
     return null;
 }
 
+// 管路關閉時的透明度與發光，依 X-ray 狀態決定
+function pipeOffOpacity()   { return isXRayMode ? 0.85 : 0.05; }
+function pipeOffEmissive()  { return isXRayMode ? 1.2  : 0;    }
+
 function createConeVolumetricLight(color) {
     const h = 3.2;
     const geo = new THREE.ConeGeometry(0.55, h, 32, 1, true);
@@ -616,10 +615,11 @@ function closeMenu() {
 // ── 補回這個函式 ──
 function toggleXRayMode(enable) {
     const processedMaterials = new Set();
+
     scene.traverse((obj) => {
         if (!obj.isMesh) return;
         const name = obj.name.toLowerCase();
-        const isPipe = name.includes('measure') || name.includes('pipe');
+        const isPipe = name.includes('pipe');
         const isDevice = interactiveDevices.includes(obj) || name.includes('bulb');
         if (isDevice) return;
 
@@ -627,27 +627,24 @@ function toggleXRayMode(enable) {
         if (processedMaterials.has(mat)) return;
         processedMaterials.add(mat);
 
-        // ── 管路：只調整「目前未啟動」的管路，啟動中的保持 0.75 不動 ──
-        if (isPipe) {
-            const pipeEntry = flowingPipes.get(name);
-            if (pipeEntry && !pipeEntry.active) {
-                mat.opacity = enable ? 0.45 : 0.05;
-                mat.needsUpdate = true;
-            }
-            return;
-        }
-
         if (enable) {
             mat.userData._origOpacity = mat.opacity;
             mat.userData._origTransparent = mat.transparent;
             mat.userData._origDepthWrite = mat.depthWrite;
+            mat.userData._origEmissiveIntensity = mat.emissiveIntensity; // 新增：記錄原本值
+
             mat.transparent = true;
-            mat.opacity = 0.15;
+            mat.opacity = isPipe ? 0.85 : 0.15;
             mat.depthWrite = false;
+
+            if (isPipe) mat.emissiveIntensity = 1.2;  // 讓管路自己發光
+            mat.needsUpdate = true;
+
         } else {
             mat.opacity = mat.userData._origOpacity ?? 1.0;
             mat.transparent = mat.userData._origTransparent ?? false;
             mat.depthWrite = mat.userData._origDepthWrite ?? true;
+            mat.emissiveIntensity = mat.userData._origEmissiveIntensity ?? 0;  // 還原
         }
         mat.needsUpdate = true;
     });
@@ -734,7 +731,7 @@ warningOffBtn.onclick = () => {
     const pipe = flowingPipes.get(`pipe_${deviceName}`);
     if (pipe) {
         pipe.active = false;
-        pipe.mesh.material.opacity     = getInactivePipeOpacity();
+        pipe.mesh.material.opacity = 0.05;
         pipe.mesh.material.emissiveIntensity = 0;
         waterFlows[deviceName]?.setActive(false);
     }
@@ -743,7 +740,7 @@ warningOffBtn.onclick = () => {
     const hotPipe = flowingPipes.get(`pipe_${deviceName}_w`);
     if (hotPipe) {
         hotPipe.active = false;
-        pipe.mesh.material.opacity     = getInactivePipeOpacity();
+        hotPipe.mesh.material.opacity = 0.05;
         hotPipe.mesh.material.emissiveIntensity = 0;
     }
 
@@ -767,7 +764,7 @@ warningOffBtn.onclick = () => {
     const total = flowingPipes.get('pipe_restroom');
     if (total) {
         total.active = anyActive;
-        total.mesh.material.opacity    = anyActive    ? 0.6 : getInactivePipeOpacity();
+        total.mesh.material.opacity = anyActive ? 0.6 : 0.05;
         total.mesh.material.emissiveIntensity = anyActive ? undefined : 0;
     }
 
@@ -778,7 +775,7 @@ warningOffBtn.onclick = () => {
     const totalHot = flowingPipes.get('pipe_restroom_w');
     if (totalHot) {
         totalHot.active = anyHotActive;
-        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : getInactivePipeOpacity();
+        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : 0.05;
         totalHot.mesh.material.emissiveIntensity = anyHotActive ? undefined : 0;
     }
 
@@ -844,8 +841,8 @@ renderer.domElement.addEventListener('click', () => {
     if (pipe) {
         pipe.active = !pipe.active;
         waterFlows[targetName]?.setActive(pipe.active);
-        pipe.mesh.material.opacity    = pipe.active    ? 0.75 : getInactivePipeOpacity();
-        if (!pipe.active) pipe.mesh.material.emissiveIntensity = 0;
+        pipe.mesh.material.opacity = pipe.active ? 0.75 : pipeOffOpacity();
+        if (!pipe.active) pipe.mesh.material.emissiveIntensity = pipeOffEmissive();
 
         // 計時器
         if (activeTimers[targetName]) {
@@ -865,8 +862,8 @@ renderer.domElement.addEventListener('click', () => {
 
     if (hotPipe) {
         hotPipe.active = isNowActive;
-        hotPipe.mesh.material.opacity = isNowActive    ? 0.75 : getInactivePipeOpacity();
-        if (!isNowActive) hotPipe.mesh.material.emissiveIntensity = 0;
+        hotPipe.mesh.material.opacity = isNowActive ? 0.75 : pipeOffOpacity();
+if (!isNowActive) hotPipe.mesh.material.emissiveIntensity = pipeOffEmissive();
     }
 
     // ── 同步冷水幹管 pipe_restroom（只要有任何冷水管 active 就亮）──
@@ -880,8 +877,8 @@ renderer.domElement.addEventListener('click', () => {
     const total = flowingPipes.get('pipe_restroom');
     if (total) {
         total.active = anyActive;
-        total.mesh.material.opacity   = anyActive      ? 0.6  : getInactivePipeOpacity();
-        if (!anyActive) total.mesh.material.emissiveIntensity = 0;
+        ttotal.mesh.material.opacity = anyActive ? 0.6 : pipeOffOpacity();
+if (!anyActive) total.mesh.material.emissiveIntensity = pipeOffEmissive();
     }
 
     // ── 同步熱水幹管 pipe_restroom_w（只要有任何熱水管 active 就亮）──
@@ -895,8 +892,8 @@ renderer.domElement.addEventListener('click', () => {
     const totalHot = flowingPipes.get('pipe_restroom_w');
     if (totalHot) {
         totalHot.active = anyHotActive;
-        totalHot.mesh.material.opacity = anyHotActive  ? 0.6  : getInactivePipeOpacity();
-        if (!anyHotActive) totalHot.mesh.material.emissiveIntensity = 0;
+        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : pipeOffOpacity();
+if (!anyHotActive) totalHot.mesh.material.emissiveIntensity = pipeOffEmissive();;
     }
 
     // ── 在 pipe.active 切換後，同步對應的 drain 漩渦 ──
