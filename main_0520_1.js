@@ -103,7 +103,7 @@ class WaterFlow {
             );
         } else {
             const angle = Math.random() * Math.PI * 2;
-            const radius = 0.02 + Math.random() * 0.03;
+            const radius = 0.04 + Math.random() * 0.06;
             this.velocities[i] = new THREE.Vector3(
                 Math.cos(angle) * radius,
                 -(0.02 + Math.random() * 0.02),
@@ -528,7 +528,7 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
             }
 
             // ✅ 依名稱判斷漩渦大小
-            const drainRadius = name.includes('faucet') ? 0.25 : 0.6;
+            const drainRadius = name.includes('faucet') ? 0.3 : 0.6;
             drainFlows[name] = new DrainFlow(scene, worldPos, drainRadius);
             // 將該排水效果的 Y 軸縮放比例設得非常低（例如原本的 1% 或更低），讓它扁平化
             console.log(`[Drain] ${name}`, worldPos);
