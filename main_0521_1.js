@@ -541,27 +541,9 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
     });
 });
 
-// ── 太陽平行光（右前方斜上 45°）──
-// ── 太陽平行光（位置由 applyDayNight 動態設定）──
-const sunLight = new THREE.DirectionalLight(0xfff5e0, 0);
-scene.add(sunLight);
-scene.add(sunLight.target);  // target 預設原點
-
-// 太陽視覺球體
-const sunMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(1.8, 16, 16),
-    new THREE.MeshBasicMaterial({ color: 0xffee88 })
-);
-scene.add(sunMesh);
-
-const sunGlow = new THREE.Mesh(
-    new THREE.SphereGeometry(3.2, 16, 16),
-    new THREE.MeshBasicMaterial({
-        color: 0xffcc33, transparent: true,
-        opacity: 0.18, side: THREE.BackSide, depthWrite: false,
-    })
-);
-sunMesh.add(sunGlow);
+// ─────────────────────────────────────────
+// 七、UI
+// ─────────────────────────────────────────
 // ─────────────────────────────────────────
 // 七、UI
 // ─────────────────────────────────────────
@@ -833,154 +815,9 @@ function showWarning(deviceName) {
 }
 
 // ─────────────────────────────────────────
-// 日夜滑桿（ESC 顯示 / 左鍵鎖定後隱藏）
-// ─────────────────────────────────────────
-let targetBulbStrength = 1.0;
-let currentBulbStrength = 1.0;
-const BULB_LERP_SPEED = 30.0;
-const bulbMeshes = [];
-
-function collectBulbs() {
-    scene.traverse((obj) => {
-        if (!obj.isMesh || !obj.name.toLowerCase().includes('bulb')) return;
-        const spot = obj.children.find(c => c.isSpotLight) ?? null;
-        bulbMeshes.push({ mesh: obj, spot });
-    });
-}
-
-// 掛在 manager.onLoad 之後執行
-const _origOnLoad = manager.onLoad;
-manager.onLoad = () => {
-    _origOnLoad?.();
-    collectBulbs();
-    applyDayNight(parseFloat(daySlider.value));
-};
-
-// ── 滑桿容器（預設隱藏）──
-const sliderWrap = document.createElement('div');
-Object.assign(sliderWrap.style, {
-    position: 'fixed',
-    bottom: '28px',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    background: 'rgba(0,0,0,0.55)',
-    backdropFilter: 'blur(6px)',
-    border: '1px solid rgba(255,255,255,0.15)',
-    borderRadius: '40px',
-    padding: '10px 22px',
-    zIndex: '300',
-    pointerEvents: 'none',       // ← 預設不可互動
-    userSelect: 'none',
-    opacity: '0',          // ← 預設透明
-    transition: 'opacity 0.3s ease',
-});
-document.body.appendChild(sliderWrap);
-
-sliderWrap.appendChild(Object.assign(document.createElement('span'), {
-    textContent: '🌙', style: 'font-size:22px'
-}));
-
-const daySlider = document.createElement('input');
-Object.assign(daySlider, { type: 'range', min: '0', max: '100', value: '50' });
-Object.assign(daySlider.style, { width: '200px', cursor: 'pointer', accentColor: '#ffd97a' });
-sliderWrap.appendChild(daySlider);
-
-sliderWrap.appendChild(Object.assign(document.createElement('span'), {
-    textContent: '☀️', style: 'font-size:22px'
-}));
-
-// ── 核心日夜函式 ──
-function applyDayNight(t) {
-    const n = t / 100;   // 0 = 地平線, 1 = 45° 仰角
-
-    // ── 1. 太陽仰角（0° → 45°）及位置 ──────────────────────
-    const elevation = n * (Math.PI / 4);     // 0 → π/4 (45°)
-    const azimuth = Math.PI / 4;           // 固定右前方 45° 方位角
-    const dist = 60;
-
-    const sx = Math.cos(elevation) * Math.sin(azimuth) * dist;
-    const sy = Math.sin(elevation) * dist;
-    const sz = -Math.cos(elevation) * Math.cos(azimuth) * dist;// 第一個-Math改成+Math，右前方移到右後方
-
-    sunLight.position.set(sx, sy, sz);
-    sunMesh.position.set(sx, sy, sz);
-
-    // ── 2. 太陽光強度：sin(仰角)，地平線時幾乎為 0 ──────────
-    const sinElev = Math.sin(elevation);         // 0 → 0.707
-    sunLight.intensity = sinElev * 5.0;
-
-    // ── 3. 太陽色溫：地平線橙紅 → 高空暖白 ──────────────────
-    const dawnColor = new THREE.Color(0xff6622);
-    const noonColor = new THREE.Color(0xfff5e0);
-    const sunColor = dawnColor.clone().lerp(noonColor, n);
-    sunLight.color.copy(sunColor);
-    sunMesh.material.color.copy(sunColor);
-
-    // ── 4. 渲染曝光：地平線暗 → 高空亮 ──────────────────────
-    renderer.toneMappingExposure = 0.2 + n * 1.0;   // 0.2 → 1.2
-
-    // ── 5. 環境光：隨仰角增強 ────────────────────────────────
-    const ambLight = scene.children.find(o => o.isAmbientLight);
-    if (ambLight) ambLight.intensity = 0.005 + n * 0.5;
-
-    // ── 6. 天空色：暗橙（地平線）→ 淺藍（高空）─────────────
-    if (scene.background instanceof THREE.Color) {
-        scene.background.lerpColors(
-            new THREE.Color(0x0d0503),   // 近黑暗橙
-            new THREE.Color(0x87ceeb),   // 晴天藍
-            n
-        );
-    }
-
-    // ── 7. 室內燈泡：太陽低時維持開燈，超過 55 即滅 ─────────
-    // ── 7. 室內燈泡：固定原始亮度，超過 55 即滅 ──
-
-    // ❌ 舊的（有補償，會越來越亮）：
-    // if (n <= 0.5) {
-    //     const refExp = 0.2 + 0.5 * 1.0;
-    //     const curExp = 0.2 + n * 1.0;
-    //     targetBulbStrength = Math.min(refExp / curExp, 3.0);
-    // } else if (n <= 0.55) {
-    //     targetBulbStrength = 1.0;
-    // } else {
-    //     targetBulbStrength = 0.0;
-    // }
-
-    // ✅ 新的（固定原始亮度）：
-    targetBulbStrength = n <= 0.50 ? 1.0 : 0.0;
-}
-
-function applyBulbStrength(s) {
-    bulbMeshes.forEach(({ mesh, spot }) => {
-        if (mesh.material) mesh.material.emissiveIntensity = s * 10;
-        if (spot) spot.intensity = s * 3;
-    });
-}
-
-daySlider.addEventListener('input', () => applyDayNight(parseFloat(daySlider.value)));
-daySlider.addEventListener('mousedown', e => e.stopPropagation());
-daySlider.addEventListener('click', e => e.stopPropagation());
-// ─────────────────────────────────────────
 // 八、控制與互動
 // ─────────────────────────────────────────
 const controls = new PointerLockControls(camera, renderer.domElement);
-
-// ── 鎖定/解鎖時切換滑桿顯示 ──
-controls.addEventListener('lock', () => {
-    sliderWrap.style.opacity = '0';
-    sliderWrap.style.pointerEvents = 'none';
-});
-
-controls.addEventListener('unlock', () => {
-    // 警告彈窗開著時不顯示（避免重疊）
-    if (warningModal.style.display !== 'block') {
-        sliderWrap.style.opacity = '1';
-        sliderWrap.style.pointerEvents = 'auto';
-    }
-});
 
 renderer.domElement.addEventListener('click', () => {
     // 選單開著 → 左鍵關選單
@@ -1132,13 +969,6 @@ function animate() {
         if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
         controls.moveForward(-velocity.z * delta);
         controls.moveRight(-velocity.x * delta);
-    }
-
-    // ── 燈泡平滑 lerp ──
-    if (Math.abs(currentBulbStrength - targetBulbStrength) > 0.001) {
-        currentBulbStrength += (targetBulbStrength - currentBulbStrength)
-            * Math.min(BULB_LERP_SPEED * delta, 1.0);
-        applyBulbStrength(currentBulbStrength);
     }
 
     prevTime = time;
