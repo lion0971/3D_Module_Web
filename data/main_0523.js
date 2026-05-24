@@ -4,7 +4,7 @@ import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer';
-import { CONFIG } from './scene-config.js';
+import { CONFIG } from '../scene-config.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -316,7 +316,7 @@ composer.addPass(new UnrealBloomPass(
 
 const labelRenderer = new CSS2DRenderer();
 labelRenderer.setSize(window.innerWidth, window.innerHeight);
-labelRenderer.domElement.style.cssText = 'position:fixed;top:0;left:0;pointer-events:none;width:100%;height:100%';
+labelRenderer.domElement.style.cssText = 'position:absolute;top:0;pointer-events:none';
 document.body.appendChild(labelRenderer.domElement);
 
 // ─────────────────────────────────────────
@@ -542,23 +542,28 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
 });
 
 // ── 太陽平行光（右前方斜上 45°）──
-// ── 太陽平行光（位置由 applyDayNight 動態設定）──
-const sunLight = new THREE.DirectionalLight(0xfff5e0, 0);
+const sunLight = new THREE.DirectionalLight(0xfff5e0, 0);  // 初始強度 0，由滑桿控制
+sunLight.position.set(40, 40, -40);   // +x=右, +y=上, -z=前
 scene.add(sunLight);
-scene.add(sunLight.target);  // target 預設原點
+scene.add(sunLight.target);           // target 預設原點（模型中心）
 
 // 太陽視覺球體
 const sunMesh = new THREE.Mesh(
     new THREE.SphereGeometry(1.8, 16, 16),
     new THREE.MeshBasicMaterial({ color: 0xffee88 })
 );
+sunMesh.position.copy(sunLight.position);
 scene.add(sunMesh);
 
+// 太陽外暈
 const sunGlow = new THREE.Mesh(
     new THREE.SphereGeometry(3.2, 16, 16),
     new THREE.MeshBasicMaterial({
-        color: 0xffcc33, transparent: true,
-        opacity: 0.18, side: THREE.BackSide, depthWrite: false,
+        color: 0xffcc33,
+        transparent: true,
+        opacity: 0.18,
+        side: THREE.BackSide,
+        depthWrite: false,
     })
 );
 sunMesh.add(sunGlow);
@@ -894,72 +899,37 @@ sliderWrap.appendChild(Object.assign(document.createElement('span'), {
 
 // ── 核心日夜函式 ──
 function applyDayNight(t) {
-    const n = t / 100;   // 0 = 地平線, 1 = 45° 仰角
+    const n = t / 100;
+    const curExposure = 0.15 + n * 1.05;
+    renderer.toneMappingExposure = curExposure;
 
-    // ── 1. 太陽仰角（0° → 45°）及位置 ──────────────────────
-    const elevation = n * (Math.PI / 4);     // 0 → π/4 (45°)
-    const azimuth = Math.PI / 4;           // 固定右前方 45° 方位角
-    const dist = 60;
-
-    const sx = Math.cos(elevation) * Math.sin(azimuth) * dist;
-    const sy = Math.sin(elevation) * dist;
-    const sz = +Math.cos(elevation) * Math.cos(azimuth) * dist;// 第一個-Math改成+Math，右前方移到右後方
-
-    sunLight.position.set(sx, sy, sz);
-    sunMesh.position.set(sx, sy, sz);
-
-    // ── 2. 太陽光強度：sin(仰角)，地平線時幾乎為 0 ──────────
-    const sinElev = Math.sin(elevation);         // 0 → 0.707
-    sunLight.intensity = sinElev * 3.6;
-
-    // ── 3. 太陽色溫：地平線橙紅 → 高空暖白 ──────────────────
-    const dawnColor = new THREE.Color(0xff6622);
-    const noonColor = new THREE.Color(0xfff5e0);
-    const sunColor = dawnColor.clone().lerp(noonColor, n);
-    sunLight.color.copy(sunColor);
-    sunMesh.material.color.copy(sunColor);
-
-    // ── 4. 渲染曝光：地平線暗 → 高空亮 ──────────────────────
-    renderer.toneMappingExposure = 0.2 + n * 1.0;   // 0.2 → 1.2
-
-    // ── 5. 環境光：隨仰角增強 ────────────────────────────────
     const ambLight = scene.children.find(o => o.isAmbientLight);
-    if (ambLight) ambLight.intensity = 0.005 + n * 0.5;
+    if (ambLight) ambLight.intensity = n * 0.8;
 
-    // ── 6. 天空色：暗橙（地平線）→ 淺藍（高空）─────────────
     if (scene.background instanceof THREE.Color) {
         scene.background.lerpColors(
-            new THREE.Color(0x0d0503),   // 近黑暗橙
-            new THREE.Color(0x87ceeb),   // 晴天藍
+            new THREE.Color(0x050a1a),
+            new THREE.Color(0x87ceeb),
             n
         );
     }
 
-    // ── 7. 室內燈泡：太陽低時維持開燈，超過 55 即滅 ─────────
-    // ── 7. 室內燈泡：固定原始亮度，超過 55 即滅 ──
+    // 太陽光強度：t=0→0, t=50→0, t=100→3（右半段才亮）
+    const sunN = Math.max(0, (n - 0.5) * 2);
+    sunLight.intensity = sunN * 3.0;
+    sunMesh.material.opacity !== undefined
+        ? (sunMesh.material.opacity = 0.4 + sunN * 0.6)
+        : null;
+    sunMesh.visible = sunN > 0.01;
+
+    // 燈泡目標強度
     if (n <= 0.5) {
-        const refExp = 1.8;
-        const curExp = 1.3 + n;
-        targetBulbStrength = Math.min(refExp / curExp, 3.0);
-    } else if (n <= 0.55) {
-        targetBulbStrength = 1.0
+        const comp = Math.min(0.675 / curExposure, 3.0);
+        targetBulbStrength = comp;
     } else {
-        targetBulbStrength = 0.0;
+        const dayN = (n - 0.5) * 2;
+        targetBulbStrength = 1.0 - Math.pow(dayN, 0.3);
     }
-
-    // ❌ 舊的（有補償，會越來越亮）：
-    // if (n <= 0.5) {
-    //     const refExp = 0.2 + 0.5 * 1.0;
-    //     const curExp = 0.1 + n * 0.6;
-    //     targetBulbStrength = Math.min(refExp / curExp, 3.0);
-    // } else if (n <= 0.55) {
-    //     targetBulbStrength = 0.70;
-    // } else {
-    //     targetBulbStrength = 0.0;
-    // }
-
-    // ✅ 新的（固定原始亮度）：
-    //targetBulbStrength = n <= 0.50 ? 1.0 : 0.0;
 }
 
 function applyBulbStrength(s) {

@@ -4,7 +4,7 @@ import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer';
-import { CONFIG } from './scene-config.js';
+import { CONFIG } from '../scene-config.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -316,7 +316,7 @@ composer.addPass(new UnrealBloomPass(
 
 const labelRenderer = new CSS2DRenderer();
 labelRenderer.setSize(window.innerWidth, window.innerHeight);
-labelRenderer.domElement.style.cssText = 'position:fixed;top:0;left:0;pointer-events:none;width:100%;height:100%';
+labelRenderer.domElement.style.cssText = 'position:absolute;top:0;pointer-events:none';
 document.body.appendChild(labelRenderer.domElement);
 
 // ─────────────────────────────────────────
@@ -910,7 +910,7 @@ function applyDayNight(t) {
 
     // ── 2. 太陽光強度：sin(仰角)，地平線時幾乎為 0 ──────────
     const sinElev = Math.sin(elevation);         // 0 → 0.707
-    sunLight.intensity = sinElev * 3.6;
+    sunLight.intensity = sinElev * 3.8;
 
     // ── 3. 太陽色溫：地平線橙紅 → 高空暖白 ──────────────────
     const dawnColor = new THREE.Color(0xff6622);
@@ -938,11 +938,11 @@ function applyDayNight(t) {
     // ── 7. 室內燈泡：太陽低時維持開燈，超過 55 即滅 ─────────
     // ── 7. 室內燈泡：固定原始亮度，超過 55 即滅 ──
     if (n <= 0.5) {
-        const refExp = 1.8;
-        const curExp = 1.3 + n;
+        const refExp = 1.6;
+        const curExp = 1.5 + n;
         targetBulbStrength = Math.min(refExp / curExp, 3.0);
     } else if (n <= 0.55) {
-        targetBulbStrength = 1.0
+        targetBulbStrength = 0.8
     } else {
         targetBulbStrength = 0.0;
     }

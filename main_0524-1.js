@@ -316,7 +316,7 @@ composer.addPass(new UnrealBloomPass(
 
 const labelRenderer = new CSS2DRenderer();
 labelRenderer.setSize(window.innerWidth, window.innerHeight);
-labelRenderer.domElement.style.cssText = 'position:fixed;top:0;left:0;pointer-events:none;width:100%;height:100%';
+labelRenderer.domElement.style.cssText = 'position:absolute;top:0;pointer-events:none';
 document.body.appendChild(labelRenderer.domElement);
 
 // ─────────────────────────────────────────

@@ -4,7 +4,7 @@ import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer';
-import { CONFIG } from './scene-config.js';
+import { CONFIG } from '../scene-config.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -23,11 +23,6 @@ const flowingPipes = new Map();
 const outletObjects = {};   // faucet_outlet / faucet_2_outlet / shower_outlet / shower_2_outlet ...
 const waterFlows = {};      // WaterFlow 實例，key 為完整裝置名稱
 let isXRayMode = false;
-
-/** 依目前模式回傳管路「非啟動」狀態的透明度 */
-function getInactivePipeOpacity() {
-    return isXRayMode ? 0.45 : 0.03;//原0.05
-};
 
 // ✅ 動態建立，traverse 時自動新增 key（支援多個裝置）
 const activeTimers = {};
@@ -97,13 +92,13 @@ class WaterFlow {
     _resetVelocity(i) {
         if (this.type === 'faucet') {
             this.velocities[i] = new THREE.Vector3(
-                (Math.random() - 0.5) * 0.015,
-                -(0.025 + Math.random() * 0.015),  // 原本 0.04~0.065，改為 0.025~0.04
-                (Math.random() - 0.5) * 0.015
+                (Math.random() - 0.5) * 0.02,
+                -(0.04 + Math.random() * 0.025),
+                (Math.random() - 0.5) * 0.02
             );
         } else {
             const angle = Math.random() * Math.PI * 2;
-            const radius = 0.010 + Math.random() * 0.03;
+            const radius = 0.04 + Math.random() * 0.06;
             this.velocities[i] = new THREE.Vector3(
                 Math.cos(angle) * radius,
                 -(0.02 + Math.random() * 0.02),
@@ -129,7 +124,7 @@ class WaterFlow {
     update(delta) {
         if (!this.active) return;
         const gravity = -0.003;
-        const maxLife = this.type === 'faucet' ? 0.2 : 0.9;
+        const maxLife = this.type === 'faucet' ? 0.8 : 0.9;
 
         for (let i = 0; i < this.count; i++) {
             this.lifetimes[i] += delta;
@@ -154,36 +149,47 @@ class WaterFlow {
 // DrainFlow：排水口漩渦粒子系統
 // ─────────────────────────────────────────
 class DrainFlow {
-    constructor(scene, drainPosition, radius = 0.6) {
+    /**
+     * @param {THREE.Scene} scene
+     * @param {THREE.Vector3} drainPosition  排水球體的世界座標
+     * @param {number} radius                螺旋初始半徑（建議 0.1~0.3）
+     */
+    constructor(scene, drainPosition, radius = 0.32) {
         this.scene = scene;
         this.drainPosition = drainPosition.clone();
         this.radius = radius;
         this.active = false;
-        this.count = 500;
+        this.count = 280;
         this.particles = [];
-        this.fadeOpacity = 0;
-        this.fadeDuration = 2.0;
-        this.fadeElapsed = 0;
+        this.fadeOpacity = 0;       // 新增：當前淡入透明度
+        this.fadeDuration = 3.0;    // 新增：淡入秒數（可自行調整）
+        this.fadeElapsed = 0;       // 新增：已經過的秒數
         this._build();
     }
 
     _build() {
         const geo = new THREE.BufferGeometry();
         this.positions = new Float32Array(this.count * 3);
-        this.colors = new Float32Array(this.count * 3);
+        const colors = new Float32Array(this.count * 3);
 
         for (let i = 0; i < this.count; i++) {
-            this._initParticle(i, true);
+            this._initParticle(i, true);   // 隨機初始位置（避免全部同時出現）
+
+            // 藍白漸層色（靠近中心的粒子顯示更亮）
+            const t = Math.random();
+            colors[i * 3] = 0.2 + t * 0.5;
+            colors[i * 3 + 1] = 0.6 + t * 0.35;
+            colors[i * 3 + 2] = 1.0;
         }
 
         geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-        geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
         const mat = new THREE.PointsMaterial({
-            size: this.radius * 0.038,  // ✅ 跟 radius 連動
+            size: 0.028,
             vertexColors: true,
             transparent: true,
-            opacity: 0.9,
+            opacity: 0.88,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
             sizeAttenuation: true,
@@ -194,45 +200,38 @@ class DrainFlow {
         this.scene.add(this.points);
     }
 
+    /**
+     * 初始化單顆粒子
+     * @param {number}  i          粒子索引
+     * @param {boolean} randomStart 第一次建立時隨機分佈，避免全部同時從外圈出發
+     */
     _initParticle(i, randomStart = false) {
-        // ✅ 關鍵：pow 指數 > 1 → 大量粒子集中在內圈，外圍自然稀疏
-        // pow(rand, 2.5)：外圍極稀，中心極密（類颱風眼牆效果）
-        const u = Math.random();
-        const r = this.radius * Math.pow(u, 2.5);
+        const r = randomStart
+            ? Math.random() * this.radius                        // 隨機半徑
+            : this.radius * (0.75 + Math.random() * 0.25);      // 從外圈附近重新生成
 
-        // ✅ 初始角度加上螺旋偏移，讓靜止時就有螺旋臂視覺
-        //    r 越大偏移越多 → 產生自然的阿基米德螺線分布
-        const spiralOffset = (r / this.radius) * Math.PI * 4;
-        const angle = randomStart
-            ? Math.random() * Math.PI * 2 - spiralOffset
-            : Math.random() * Math.PI * 2 - spiralOffset;
+        const angle = Math.random() * Math.PI * 2;
+
+        // 粒子高度：從排水球體中心往上 0.05 ~ 0.35 單位
+        const y = randomStart
+            ? Math.random() * 0.01
+            : Math.random() * 0.01;
 
         this.particles[i] = {
             r,
             angle,
-            baseSpeed: 0.6 + Math.random() * 0.8,   // 低基礎速度，靠 angularMult 放大
-            driftSpeed: 0.0002 + Math.random() * 0.0003, // 極微向心漂移（保持圓面分布）
-            life: randomStart ? Math.random() * 3.0 : 0,
-            maxLife: 2.0 + Math.random() * 3.0,
+            y,
+            angularSpeed: 1.8 + Math.random() * 2.0,  // 基礎角速度（rad/s）
+            fallSpeed: 0.008 + Math.random() * 0.006, // 下落速度（單位/s）
         };
 
-        this._updateColor(i);
         this._applyPosition(i);
-    }
-
-    // ✅ 依半徑動態更新顏色：中心白藍亮，外圈深藍暗
-    _updateColor(i) {
-        const p = this.particles[i];
-        const t = 1.0 - (p.r / this.radius);   // 0=外圍, 1=中心
-        this.colors[i * 3] = 0.25 + t * 0.65;  // R
-        this.colors[i * 3 + 1] = 0.60 + t * 0.38;  // G
-        this.colors[i * 3 + 2] = 1.0;               // B
     }
 
     _applyPosition(i) {
         const p = this.particles[i];
         this.positions[i * 3] = this.drainPosition.x + Math.cos(p.angle) * p.r;
-        this.positions[i * 3 + 1] = this.drainPosition.y;   // 保持平面，從上看是圓面
+        this.positions[i * 3 + 1] = this.drainPosition.y + p.y;
         this.positions[i * 3 + 2] = this.drainPosition.z + Math.sin(p.angle) * p.r;
     }
 
@@ -248,37 +247,32 @@ class DrainFlow {
     update(delta) {
         if (!this.active) return;
 
+        // ── 淡入計算 ──
         this.fadeElapsed += delta;
         this.fadeOpacity = Math.min(this.fadeElapsed / this.fadeDuration, 1.0);
 
         for (let i = 0; i < this.count; i++) {
             const p = this.particles[i];
 
-            // ✅ 旋轉速度：內圈速度指數倍放大
-            //    外圈（r≈radius）：omega ≈ baseSpeed × 1（慢）
-            //    內圈（r≈0）：omega → 爆增（快）
-            const omega = p.baseSpeed * Math.pow(this.radius / (p.r + 0.012), 2.2);
-            p.angle += omega * delta;
+            const angularMult = Math.pow(this.radius / (p.r + 0.008), 1.8);
+            p.angle += p.angularSpeed * angularMult * delta;
 
-            // ✅ 極微向心漂移：讓粒子緩慢旋入，製造動態感
-            //    但不能太強，否則全堆外圈（之前的問題）
-            p.r -= p.driftSpeed * this.radius * delta;
+            const pullStrength = 0.06 + (this.radius - p.r) * 0.4;
+            p.r -= pullStrength * delta;
 
-            p.life += delta;
+            p.y -= p.fallSpeed * delta;
 
-            if (p.life >= p.maxLife || p.r < 0.008) {
-                // 重生：重新在整個圓面上以中心偏重分布
+            if (p.r < 0.006 || p.y < -0.002) {
                 this._initParticle(i, false);
             } else {
-                this._updateColor(i);   // 移動後更新顏色
                 this._applyPosition(i);
             }
         }
 
         this.points.geometry.attributes.position.needsUpdate = true;
-        this.points.geometry.attributes.color.needsUpdate = true;
 
-        const flicker = 0.78 + Math.sin(performance.now() * 0.004) * 0.15;
+        // ── opacity 結合淡入與閃爍 ──
+        const flicker = 0.72 + Math.sin(performance.now() * 0.005) * 0.16;
         this.points.material.opacity = flicker * this.fadeOpacity;
     }
 
@@ -316,7 +310,7 @@ composer.addPass(new UnrealBloomPass(
 
 const labelRenderer = new CSS2DRenderer();
 labelRenderer.setSize(window.innerWidth, window.innerHeight);
-labelRenderer.domElement.style.cssText = 'position:fixed;top:0;left:0;pointer-events:none;width:100%;height:100%';
+labelRenderer.domElement.style.cssText = 'position:absolute;top:0;pointer-events:none';
 document.body.appendChild(labelRenderer.domElement);
 
 // ─────────────────────────────────────────
@@ -333,6 +327,10 @@ function getDeviceType(name) {
     if (name.startsWith('shower')) return 'shower';
     return null;
 }
+
+// 管路關閉時的透明度與發光，依 X-ray 狀態決定
+function pipeOffOpacity()   { return isXRayMode ? 0.85 : 0.05; }
+function pipeOffEmissive()  { return isXRayMode ? 1.2  : 0;    }
 
 function createConeVolumetricLight(color) {
     const h = 3.2;
@@ -372,7 +370,7 @@ function setupPipeMaterial(mesh, baseColor = 0x00aaff, emissiveColor = 0x0055ff)
     mesh.material = new THREE.MeshStandardMaterial({
         color: baseColor,
         transparent: true,
-        opacity: 0.03,//原0.05
+        opacity: 0.05,
         emissive: new THREE.Color(emissiveColor),
         emissiveIntensity: 0,
         roughness: 0.1,
@@ -527,9 +525,7 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
                 });
             }
 
-            // ✅ 依名稱判斷漩渦大小
-            const drainRadius = name.includes('faucet') ? 0.25 : 0.6;
-            drainFlows[name] = new DrainFlow(scene, worldPos, drainRadius);
+            drainFlows[name] = new DrainFlow(scene, worldPos, 0.25);
             // 將該排水效果的 Y 軸縮放比例設得非常低（例如原本的 1% 或更低），讓它扁平化
             console.log(`[Drain] ${name}`, worldPos);
         }
@@ -541,27 +537,9 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
     });
 });
 
-// ── 太陽平行光（右前方斜上 45°）──
-// ── 太陽平行光（位置由 applyDayNight 動態設定）──
-const sunLight = new THREE.DirectionalLight(0xfff5e0, 0);
-scene.add(sunLight);
-scene.add(sunLight.target);  // target 預設原點
-
-// 太陽視覺球體
-const sunMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(1.8, 16, 16),
-    new THREE.MeshBasicMaterial({ color: 0xffee88 })
-);
-scene.add(sunMesh);
-
-const sunGlow = new THREE.Mesh(
-    new THREE.SphereGeometry(3.2, 16, 16),
-    new THREE.MeshBasicMaterial({
-        color: 0xffcc33, transparent: true,
-        opacity: 0.18, side: THREE.BackSide, depthWrite: false,
-    })
-);
-sunMesh.add(sunGlow);
+// ─────────────────────────────────────────
+// 七、UI
+// ─────────────────────────────────────────
 // ─────────────────────────────────────────
 // 七、UI
 // ─────────────────────────────────────────
@@ -637,10 +615,11 @@ function closeMenu() {
 // ── 補回這個函式 ──
 function toggleXRayMode(enable) {
     const processedMaterials = new Set();
+
     scene.traverse((obj) => {
         if (!obj.isMesh) return;
         const name = obj.name.toLowerCase();
-        const isPipe = name.includes('measure') || name.includes('pipe');
+        const isPipe = name.includes('pipe');
         const isDevice = interactiveDevices.includes(obj) || name.includes('bulb');
         if (isDevice) return;
 
@@ -648,27 +627,24 @@ function toggleXRayMode(enable) {
         if (processedMaterials.has(mat)) return;
         processedMaterials.add(mat);
 
-        // ── 管路：只調整「目前未啟動」的管路，啟動中的保持 0.75 不動 ──
-        if (isPipe) {
-            const pipeEntry = flowingPipes.get(name);
-            if (pipeEntry && !pipeEntry.active) {
-                mat.opacity = enable ? 0.45 : 0.03;//原0.05
-                mat.needsUpdate = true;
-            }
-            return;
-        }
-
         if (enable) {
             mat.userData._origOpacity = mat.opacity;
             mat.userData._origTransparent = mat.transparent;
             mat.userData._origDepthWrite = mat.depthWrite;
+            mat.userData._origEmissiveIntensity = mat.emissiveIntensity; // 新增：記錄原本值
+
             mat.transparent = true;
-            mat.opacity = 0.15;
+            mat.opacity = isPipe ? 0.85 : 0.15;
             mat.depthWrite = false;
+
+            if (isPipe) mat.emissiveIntensity = 1.2;  // 讓管路自己發光
+            mat.needsUpdate = true;
+
         } else {
             mat.opacity = mat.userData._origOpacity ?? 1.0;
             mat.transparent = mat.userData._origTransparent ?? false;
             mat.depthWrite = mat.userData._origDepthWrite ?? true;
+            mat.emissiveIntensity = mat.userData._origEmissiveIntensity ?? 0;  // 還原
         }
         mat.needsUpdate = true;
     });
@@ -755,7 +731,7 @@ warningOffBtn.onclick = () => {
     const pipe = flowingPipes.get(`pipe_${deviceName}`);
     if (pipe) {
         pipe.active = false;
-        pipe.mesh.material.opacity = getInactivePipeOpacity();
+        pipe.mesh.material.opacity = 0.05;
         pipe.mesh.material.emissiveIntensity = 0;
         waterFlows[deviceName]?.setActive(false);
     }
@@ -764,7 +740,7 @@ warningOffBtn.onclick = () => {
     const hotPipe = flowingPipes.get(`pipe_${deviceName}_w`);
     if (hotPipe) {
         hotPipe.active = false;
-        pipe.mesh.material.opacity = getInactivePipeOpacity();
+        hotPipe.mesh.material.opacity = 0.05;
         hotPipe.mesh.material.emissiveIntensity = 0;
     }
 
@@ -788,7 +764,7 @@ warningOffBtn.onclick = () => {
     const total = flowingPipes.get('pipe_restroom');
     if (total) {
         total.active = anyActive;
-        total.mesh.material.opacity = anyActive ? 0.6 : getInactivePipeOpacity();
+        total.mesh.material.opacity = anyActive ? 0.6 : 0.05;
         total.mesh.material.emissiveIntensity = anyActive ? undefined : 0;
     }
 
@@ -799,7 +775,7 @@ warningOffBtn.onclick = () => {
     const totalHot = flowingPipes.get('pipe_restroom_w');
     if (totalHot) {
         totalHot.active = anyHotActive;
-        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : getInactivePipeOpacity();
+        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : 0.05;
         totalHot.mesh.material.emissiveIntensity = anyHotActive ? undefined : 0;
     }
 
@@ -833,163 +809,9 @@ function showWarning(deviceName) {
 }
 
 // ─────────────────────────────────────────
-// 日夜滑桿（ESC 顯示 / 左鍵鎖定後隱藏）
-// ─────────────────────────────────────────
-let targetBulbStrength = 1.0;
-let currentBulbStrength = 1.0;
-const BULB_LERP_SPEED = 30.0;
-const bulbMeshes = [];
-
-function collectBulbs() {
-    scene.traverse((obj) => {
-        if (!obj.isMesh || !obj.name.toLowerCase().includes('bulb')) return;
-        const spot = obj.children.find(c => c.isSpotLight) ?? null;
-        bulbMeshes.push({ mesh: obj, spot });
-    });
-}
-
-// 掛在 manager.onLoad 之後執行
-const _origOnLoad = manager.onLoad;
-manager.onLoad = () => {
-    _origOnLoad?.();
-    collectBulbs();
-    applyDayNight(parseFloat(daySlider.value));
-};
-
-// ── 滑桿容器（預設隱藏）──
-const sliderWrap = document.createElement('div');
-Object.assign(sliderWrap.style, {
-    position: 'fixed',
-    bottom: '28px',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    background: 'rgba(0,0,0,0.55)',
-    backdropFilter: 'blur(6px)',
-    border: '1px solid rgba(255,255,255,0.15)',
-    borderRadius: '40px',
-    padding: '10px 22px',
-    zIndex: '300',
-    pointerEvents: 'none',       // ← 預設不可互動
-    userSelect: 'none',
-    opacity: '0',          // ← 預設透明
-    transition: 'opacity 0.3s ease',
-});
-document.body.appendChild(sliderWrap);
-
-sliderWrap.appendChild(Object.assign(document.createElement('span'), {
-    textContent: '🌙', style: 'font-size:22px'
-}));
-
-const daySlider = document.createElement('input');
-Object.assign(daySlider, { type: 'range', min: '0', max: '100', value: '50' });
-Object.assign(daySlider.style, { width: '200px', cursor: 'pointer', accentColor: '#ffd97a' });
-sliderWrap.appendChild(daySlider);
-
-sliderWrap.appendChild(Object.assign(document.createElement('span'), {
-    textContent: '☀️', style: 'font-size:22px'
-}));
-
-// ── 核心日夜函式 ──
-function applyDayNight(t) {
-    const n = t / 100;   // 0 = 地平線, 1 = 45° 仰角
-
-    // ── 1. 太陽仰角（0° → 45°）及位置 ──────────────────────
-    const elevation = n * (Math.PI / 4);     // 0 → π/4 (45°)
-    const azimuth = Math.PI / 4;           // 固定右前方 45° 方位角
-    const dist = 60;
-
-    const sx = Math.cos(elevation) * Math.sin(azimuth) * dist;
-    const sy = Math.sin(elevation) * dist;
-    const sz = +Math.cos(elevation) * Math.cos(azimuth) * dist;// 第一個-Math改成+Math，右前方移到右後方
-
-    sunLight.position.set(sx, sy, sz);
-    sunMesh.position.set(sx, sy, sz);
-
-    // ── 2. 太陽光強度：sin(仰角)，地平線時幾乎為 0 ──────────
-    const sinElev = Math.sin(elevation);         // 0 → 0.707
-    sunLight.intensity = sinElev * 3.6;
-
-    // ── 3. 太陽色溫：地平線橙紅 → 高空暖白 ──────────────────
-    const dawnColor = new THREE.Color(0xff6622);
-    const noonColor = new THREE.Color(0xfff5e0);
-    const sunColor = dawnColor.clone().lerp(noonColor, n);
-    sunLight.color.copy(sunColor);
-    sunMesh.material.color.copy(sunColor);
-
-    // ── 4. 渲染曝光：地平線暗 → 高空亮 ──────────────────────
-    renderer.toneMappingExposure = 0.2 + n * 1.0;   // 0.2 → 1.2
-
-    // ── 5. 環境光：隨仰角增強 ────────────────────────────────
-    const ambLight = scene.children.find(o => o.isAmbientLight);
-    if (ambLight) ambLight.intensity = 0.005 + n * 0.5;
-
-    // ── 6. 天空色：暗橙（地平線）→ 淺藍（高空）─────────────
-    if (scene.background instanceof THREE.Color) {
-        scene.background.lerpColors(
-            new THREE.Color(0x0d0503),   // 近黑暗橙
-            new THREE.Color(0x87ceeb),   // 晴天藍
-            n
-        );
-    }
-
-    // ── 7. 室內燈泡：太陽低時維持開燈，超過 55 即滅 ─────────
-    // ── 7. 室內燈泡：固定原始亮度，超過 55 即滅 ──
-    if (n <= 0.5) {
-        const refExp = 1.8;
-        const curExp = 1.3 + n;
-        targetBulbStrength = Math.min(refExp / curExp, 3.0);
-    } else if (n <= 0.55) {
-        targetBulbStrength = 1.0
-    } else {
-        targetBulbStrength = 0.0;
-    }
-
-    // ❌ 舊的（有補償，會越來越亮）：
-    // if (n <= 0.5) {
-    //     const refExp = 0.2 + 0.5 * 1.0;
-    //     const curExp = 0.1 + n * 0.6;
-    //     targetBulbStrength = Math.min(refExp / curExp, 3.0);
-    // } else if (n <= 0.55) {
-    //     targetBulbStrength = 0.70;
-    // } else {
-    //     targetBulbStrength = 0.0;
-    // }
-
-    // ✅ 新的（固定原始亮度）：
-    //targetBulbStrength = n <= 0.50 ? 1.0 : 0.0;
-}
-
-function applyBulbStrength(s) {
-    bulbMeshes.forEach(({ mesh, spot }) => {
-        if (mesh.material) mesh.material.emissiveIntensity = s * 10;
-        if (spot) spot.intensity = s * 3;
-    });
-}
-
-daySlider.addEventListener('input', () => applyDayNight(parseFloat(daySlider.value)));
-daySlider.addEventListener('mousedown', e => e.stopPropagation());
-daySlider.addEventListener('click', e => e.stopPropagation());
-// ─────────────────────────────────────────
 // 八、控制與互動
 // ─────────────────────────────────────────
 const controls = new PointerLockControls(camera, renderer.domElement);
-
-// ── 鎖定/解鎖時切換滑桿顯示 ──
-controls.addEventListener('lock', () => {
-    sliderWrap.style.opacity = '0';
-    sliderWrap.style.pointerEvents = 'none';
-});
-
-controls.addEventListener('unlock', () => {
-    // 警告彈窗開著時不顯示（避免重疊）
-    if (warningModal.style.display !== 'block') {
-        sliderWrap.style.opacity = '1';
-        sliderWrap.style.pointerEvents = 'auto';
-    }
-});
 
 renderer.domElement.addEventListener('click', () => {
     // 選單開著 → 左鍵關選單
@@ -1019,8 +841,8 @@ renderer.domElement.addEventListener('click', () => {
     if (pipe) {
         pipe.active = !pipe.active;
         waterFlows[targetName]?.setActive(pipe.active);
-        pipe.mesh.material.opacity = pipe.active ? 0.75 : getInactivePipeOpacity();
-        if (!pipe.active) pipe.mesh.material.emissiveIntensity = 0;
+        pipe.mesh.material.opacity = pipe.active ? 0.75 : pipeOffOpacity();
+        if (!pipe.active) pipe.mesh.material.emissiveIntensity = pipeOffEmissive();
 
         // 計時器
         if (activeTimers[targetName]) {
@@ -1040,8 +862,8 @@ renderer.domElement.addEventListener('click', () => {
 
     if (hotPipe) {
         hotPipe.active = isNowActive;
-        hotPipe.mesh.material.opacity = isNowActive ? 0.75 : getInactivePipeOpacity();
-        if (!isNowActive) hotPipe.mesh.material.emissiveIntensity = 0;
+        hotPipe.mesh.material.opacity = isNowActive ? 0.75 : pipeOffOpacity();
+if (!isNowActive) hotPipe.mesh.material.emissiveIntensity = pipeOffEmissive();
     }
 
     // ── 同步冷水幹管 pipe_restroom（只要有任何冷水管 active 就亮）──
@@ -1055,8 +877,8 @@ renderer.domElement.addEventListener('click', () => {
     const total = flowingPipes.get('pipe_restroom');
     if (total) {
         total.active = anyActive;
-        total.mesh.material.opacity = anyActive ? 0.6 : getInactivePipeOpacity();
-        if (!anyActive) total.mesh.material.emissiveIntensity = 0;
+        ttotal.mesh.material.opacity = anyActive ? 0.6 : pipeOffOpacity();
+if (!anyActive) total.mesh.material.emissiveIntensity = pipeOffEmissive();
     }
 
     // ── 同步熱水幹管 pipe_restroom_w（只要有任何熱水管 active 就亮）──
@@ -1070,8 +892,8 @@ renderer.domElement.addEventListener('click', () => {
     const totalHot = flowingPipes.get('pipe_restroom_w');
     if (totalHot) {
         totalHot.active = anyHotActive;
-        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : getInactivePipeOpacity();
-        if (!anyHotActive) totalHot.mesh.material.emissiveIntensity = 0;
+        totalHot.mesh.material.opacity = anyHotActive ? 0.6 : pipeOffOpacity();
+if (!anyHotActive) totalHot.mesh.material.emissiveIntensity = pipeOffEmissive();;
     }
 
     // ── 在 pipe.active 切換後，同步對應的 drain 漩渦 ──
@@ -1141,13 +963,6 @@ function animate() {
         if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
         controls.moveForward(-velocity.z * delta);
         controls.moveRight(-velocity.x * delta);
-    }
-
-    // ── 燈泡平滑 lerp ──
-    if (Math.abs(currentBulbStrength - targetBulbStrength) > 0.001) {
-        currentBulbStrength += (targetBulbStrength - currentBulbStrength)
-            * Math.min(BULB_LERP_SPEED * delta, 1.0);
-        applyBulbStrength(currentBulbStrength);
     }
 
     prevTime = time;
