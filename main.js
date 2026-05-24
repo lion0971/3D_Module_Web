@@ -422,6 +422,14 @@ manager.onLoad = () => {
     if (el) { el.classList.add('fade-out'); setTimeout(() => el.style.display = 'none', 1000); }
 };
 
+manager.onProgress = (url, loaded, total) => {
+    const percent = (loaded / total) * 100;
+    const bar = document.getElementById('loader-bar');
+    const text = document.getElementById('loader-text');
+    if (bar) bar.style.width = percent + '%';
+    if (text) text.textContent = `正在載入... ${Math.round(percent)}%`;
+};
+
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 

@@ -95,12 +95,42 @@ canvas {
 }
 
 #loader-bar {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #76b852, #8DC26F);
+    box-shadow: 0 0 10px rgba(118, 184, 82, 0.5);
+    transition: width 0.4s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+#loader-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -60%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255, 255, 255, 0.5),
+        transparent
+    );
+    animation: streak 1.0s ease-in-out infinite;
+}
+
+@keyframes streak {
+    0%   { left: -60%; }
+    100% { left: 120%; }
+}
+/* #loader-bar {
   width: 0%;
   height: 100%;
   background: linear-gradient(90deg, #76b852, #8DC26F);
   box-shadow: 0 0 10px rgba(118, 184, 82, 0.5);
   transition: width 0.4s ease;
-}
+} */
 
 #loader-text {
   color: #8DC26F;
