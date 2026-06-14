@@ -493,7 +493,7 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
       if (isLineBulb) {
         if (mesh.material) {
           mesh.material.emissive = new THREE.Color(0xffcc66);
-          mesh.material.emissiveIntensity = 8;
+          mesh.material.emissiveIntensity = 3;
           if (mesh.material.map) mesh.material.color.setHex(0x888866);
         }
 
@@ -518,7 +518,7 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
 
         for (let i = 0; i < numLights; i++) {
           const t = numLights === 1 ? 0 : (i / (numLights - 1) - 0.5);
-          const lp = new THREE.PointLight(0xffcc66, 0.8, 1.2, 2); // 原本 1.2, 2.5
+          const lp = new THREE.PointLight(0xffcc66, 0.3, 1.2, 2); // 原本 1.2, 2.5
           // 從 geometry 中心出發，沿主軸均勻分佈
           lp.position.copy(localCenterGeo).addScaledVector(axis, t * axisLength);
           mesh.add(lp);
@@ -535,7 +535,7 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
         const glowMesh = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
           color: 0xffcc66,
           transparent: true,
-          opacity: 0.3,
+          opacity: 0.1,
           side: THREE.BackSide,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
@@ -550,7 +550,7 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
         const outerGlowMesh = new THREE.Mesh(outerGlowGeo, new THREE.MeshBasicMaterial({
           color: 0xffaa33,
           transparent: true,
-          opacity: 0.09,
+          opacity: 0.03,
           side: THREE.BackSide,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
@@ -1066,21 +1066,20 @@ function applyDayNight(t) {
 }
 
 function applyBulbStrength(s) {
-  bulbMeshes.forEach(({ mesh, spot, lineLights }) => {
-    if (mesh.material) mesh.material.emissiveIntensity = s * (lineLights ? 8 : 10);
-    if (spot) spot.intensity = s * 3;
-    if (lineLights) {
-      lineLights.forEach(l => l.intensity = s * 1.5);
-      // 同步光暈透明度
-      mesh.children.forEach(c => {
-        if (c.isMesh && c.material?.transparent) {
-          c.material.opacity = s > 0.05
-            ? (c.material.userData._baseOpacity ?? c.material.opacity)
-            : 0;
+    bulbMeshes.forEach(({ mesh, spot, lineLights }) => {
+        if (mesh.material) mesh.material.emissiveIntensity = s * (lineLights ? 3 : 10);
+        if (spot) spot.intensity = s * 3;
+        if (lineLights) {
+            lineLights.forEach(l => l.intensity = s * 0.3);
+            mesh.children.forEach(c => {
+                if (c.isMesh && c.userData.isLineBulbGlow) {
+                    const base = c.material.userData._baseOpacity ?? 0.1;
+                    c.material.opacity = s > 0.05 ? base : 0;
+                    c.material.needsUpdate = true;
+                }
+            });
         }
-      });
-    }
-  });
+    });
 }
 
 daySlider.addEventListener('input', () => applyDayNight(parseFloat(daySlider.value)));
