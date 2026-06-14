@@ -4,67 +4,27 @@ body {
   background-color: #000;
 }
 
-/* ✅ 修正 Three.js canvas 排版問題 */
-canvas {
-    display: block;       /* 消除 baseline gap */
-    position: fixed;      /* 脫離文件流，永遠貼齊視窗 */
-    top: 0;
-    left: 0;
-}
-
-/* 1. 載入畫面的主外殼（滿版固定） */
 #loading-screen {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
   background-color: #121212;
   display: flex;
   justify-content: center;
   align-items: center;
-  overflow: hidden;
-  z-index: 9999; /* 確保在最上層 */
-  transition: opacity 0.5s ease; /* 讓淡出動態生效 */
+  z-index: 9999;
+  transition: opacity 1.2s ease, transform 1.2s ease;
 }
 
-/* 2. 核心修正：讓影片絕對定位，鋪滿整個背景 */
-#loading-video {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 100%;
-  height: 100%;
-  object-fit: cover; /* 關鍵：防變形且填滿畫面 */
-  transform: translate(-50%, -50%);
-  z-index: 1; /* 在底層 */
-  opacity: 0.6; /* 可以微調透明度，讓白字更明顯 */
-}
-
-/* 3. 進度條容器（疊在影片正上方） */
-.loader-container {
-  position: relative; /* 關鍵：改為 relative 或 absolute 來觸發 z-index */
-  z-index: 2; /* 比影片的 z-index 1 高，就會壓在影片上 */
-  text-align: center;
-  color: #ffffff;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
-  font-family: '微軟正黑體', sans-serif;
-
-  /* --- 新增與修改的樣式 --- */
-  background-color: rgba(18, 18, 18, 0.65); /* 使用 rgba，最後的 0.65 代表 65% 的透明度 */
-  border-radius: 16px;                      /* 圓角大小，數值越大越圓 */
-  padding: 30px 40px;                       /* 內距：上下 30px，左右 40px，讓內文不貼邊 */
-  
-  /* --- 選配：增加質感（毛玻璃與細邊框） --- */
-  backdrop-filter: blur(8px);               /* 毛玻璃效果：讓背景影片透過來時帶有模糊美感 */
-  border: 1px solid rgba(255, 255, 255, 0.1); /* 極細的半透明白邊，能讓深色框在暗色背景中更立體 */
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); /* 外陰影，增加懸浮層次感 */
-}
-
-/* 4. 淡出消失的樣式 */
 #loading-screen.fade-out {
   opacity: 0;
+  transform: scale(1.05);
   pointer-events: none;
+}
+
+.loader-container {
+  text-align: center;
+  font-family: '微軟正黑體', sans-serif;
 }
 
 .leaf-icon {
@@ -74,20 +34,12 @@ canvas {
 }
 
 @keyframes leaf-bounce {
-
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-15px);
-  }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-15px); }
 }
 
 .progress-wrapper {
-  width: 250px;
-  height: 6px;
+  width: 250px; height: 6px;
   background: #333;
   border-radius: 10px;
   overflow: hidden;
@@ -95,42 +47,11 @@ canvas {
 }
 
 #loader-bar {
-    width: 0%;
-    height: 100%;
-    background: linear-gradient(90deg, #76b852, #8DC26F);
-    box-shadow: 0 0 10px rgba(118, 184, 82, 0.5);
-    transition: width 0.4s ease;
-    position: relative;
-    overflow: hidden;
-}
-
-#loader-bar::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -60%;
-    width: 60%;
-    height: 100%;
-    background: linear-gradient(
-        90deg,
-        transparent,
-        rgba(255, 255, 255, 0.5),
-        transparent
-    );
-    animation: streak 1.0s ease-in-out infinite;
-}
-
-@keyframes streak {
-    0%   { left: -60%; }
-    100% { left: 120%; }
-}
-/* #loader-bar {
-  width: 0%;
-  height: 100%;
+  width: 0%; height: 100%;
   background: linear-gradient(90deg, #76b852, #8DC26F);
   box-shadow: 0 0 10px rgba(118, 184, 82, 0.5);
   transition: width 0.4s ease;
-} */
+}
 
 #loader-text {
   color: #8DC26F;
@@ -140,42 +61,25 @@ canvas {
 
 #crosshair {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 20px;
-  height: 20px;
+  top: 50%; left: 50%;
+  width: 20px; height: 20px;
   margin: -10px 0 0 -10px;
   pointer-events: none;
   z-index: 100;
 }
 
-#crosshair::before,
-#crosshair::after {
+#crosshair::before, #crosshair::after {
   content: '';
   position: absolute;
   background: white;
 }
 
-#crosshair::before {
-  top: 50%;
-  left: 0;
-  width: 100%;
-  height: 2px;
-  margin-top: -1px;
-}
-
-#crosshair::after {
-  left: 50%;
-  top: 0;
-  height: 100%;
-  width: 2px;
-  margin-left: -1px;
-}
+#crosshair::before { top: 50%; left: 0; width: 100%; height: 2px; margin-top: -1px; }
+#crosshair::after { left: 50%; top: 0; height: 100%; width: 2px; margin-left: -1px; }
 
 #instructions {
   position: absolute;
-  bottom: 20px;
-  left: 20px;
+  bottom: 20px; left: 20px;
   color: white;
   background: rgba(0, 0, 0, 0.5);
   padding: 10px;
@@ -198,13 +102,6 @@ canvas {
 }
 
 @keyframes breathe {
-
-  0%,
-  100% {
-    box-shadow: 0 0 5px #00ffcc;
-  }
-
-  50% {
-    box-shadow: 0 0 20px #00ffcc;
-  }
+  0%, 100% { box-shadow: 0 0 5px #00ffcc; }
+  50% { box-shadow: 0 0 20px #00ffcc; }
 }

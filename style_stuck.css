@@ -1,0 +1,247 @@
+body {
+  margin: 0;
+  overflow: hidden;
+  background-color: #000;
+}
+
+/* ✅ 修正 Three.js canvas 排版問題 */
+canvas {
+  display: block;
+  /* 消除 baseline gap */
+  position: fixed;
+  /* 脫離文件流，永遠貼齊視窗 */
+  top: 0;
+  left: 0;
+}
+
+#loading-screen {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  background-color: #121212;
+  display: flex;
+  flex-direction: column;       /* 垂直排列 */
+  justify-content: center;
+  align-items: center;
+  gap: 20px;                    /* loader 與說明框的間距 */
+  z-index: 9999;
+  transition: opacity 0.5s ease;
+}
+
+/* 3. 進度條容器（疊在影片正上方） */
+.loader-container {
+  position: relative;
+  /* 關鍵：改為 relative 或 absolute 來觸發 z-index */
+  z-index: 2;
+  /* 比影片的 z-index 1 高，就會壓在影片上 */
+  text-align: center;
+  color: #ffffff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  font-family: '微軟正黑體', sans-serif;
+
+  /* --- 新增與修改的樣式 --- */
+  background-color: rgba(18, 18, 18, 0.65);
+  /* 使用 rgba，最後的 0.65 代表 65% 的透明度 */
+  border-radius: 16px;
+  /* 圓角大小，數值越大越圓 */
+  padding: 30px 40px;
+  /* 內距：上下 30px，左右 40px，讓內文不貼邊 */
+
+  /* --- 選配：增加質感（毛玻璃與細邊框） --- */
+  backdrop-filter: blur(8px);
+  /* 毛玻璃效果：讓背景影片透過來時帶有模糊美感 */
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  /* 極細的半透明白邊，能讓深色框在暗色背景中更立體 */
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  /* 外陰影，增加懸浮層次感 */
+}
+
+/* 4. 淡出消失的樣式 */
+#loading-screen.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.leaf-icon {
+  font-size: 50px;
+  margin-bottom: 20px;
+  animation: leaf-bounce 1.5s infinite ease-in-out;
+}
+
+@keyframes leaf-bounce {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-15px);
+  }
+}
+
+.progress-wrapper {
+  width: 250px;
+  height: 6px;
+  background: #333;
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 10px auto;
+}
+
+#loader-bar {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #76b852, #8DC26F);
+  box-shadow: 0 0 10px rgba(118, 184, 82, 0.5);
+  transition: width 0.4s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+#loader-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg,
+      transparent,
+      rgba(255, 255, 255, 0.5),
+      transparent);
+  animation: streak 1.0s ease-in-out infinite;
+}
+
+@keyframes streak {
+  0% {
+    left: -60%;
+  }
+
+  100% {
+    left: 120%;
+  }
+}
+
+/* #loader-bar {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #76b852, #8DC26F);
+  box-shadow: 0 0 10px rgba(118, 184, 82, 0.5);
+  transition: width 0.4s ease;
+} */
+
+#loader-text {
+  color: #8DC26F;
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+
+#crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  pointer-events: none;
+  z-index: 100;
+}
+
+#crosshair::before,
+#crosshair::after {
+  content: '';
+  position: absolute;
+  background: white;
+}
+
+#crosshair::before {
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  margin-top: -1px;
+}
+
+#crosshair::after {
+  left: 50%;
+  top: 0;
+  height: 100%;
+  width: 2px;
+  margin-left: -1px;
+}
+
+/* ── 說明框：雙狀態設計 ── */
+#instructions {
+  position: fixed;
+  z-index: 10000;
+
+  /* ── 初始狀態：loader 正下方，置中 ── */
+  bottom: calc(50% - 160px);
+  /* 從視窗中心往下偏移，對齊 loader 下緣 */
+  left: 50%;
+  transform: translateX(-50%);
+
+  color: white;
+  font-family: '微軟正黑體', sans-serif;
+  font-size: 14px;
+  line-height: 1.8;
+  text-align: center;
+  letter-spacing: 0.5px;
+
+  /* 融入 loader 同色系 */
+  background: rgba(18, 18, 18, 0.65);
+  border: 1px solid rgba(141, 194, 111, 0.25);
+  /* 綠色細邊 */
+  border-radius: 12px;
+  padding: 12px 24px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+
+  /* 過場動畫 */
+  transition:
+    bottom 0.7s cubic-bezier(0.4, 0, 0.2, 1),
+    left 0.7s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.7s cubic-bezier(0.4, 0, 0.2, 1),
+    border 0.5s ease,
+    font-size 0.5s ease,
+    padding 0.5s ease;
+}
+
+/* ── 最終狀態：左下角提示條 ── */
+#instructions.at-corner {
+  bottom: 20px;
+  left: 20px;
+  transform: none;
+
+  font-size: 13px;
+  padding: 10px 14px;
+  text-align: left;
+  border-color: rgba(255, 255, 255, 0.15);
+  /* 回到原本白色邊 */
+  z-index: 50;
+}
+
+.door-label {
+  color: #00ffcc;
+  font-family: sans-serif;
+  padding: 5px 15px;
+  background: rgba(0, 40, 40, 0.6);
+  border: 1px solid #00ffcc;
+  border-radius: 4px;
+  font-size: 14px;
+  box-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+  animation: breathe 2s infinite ease-in-out;
+}
+
+@keyframes breathe {
+
+  0%,
+  100% {
+    box-shadow: 0 0 5px #00ffcc;
+  }
+
+  50% {
+    box-shadow: 0 0 20px #00ffcc;
+  }
+}
