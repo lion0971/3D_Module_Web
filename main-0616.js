@@ -489,7 +489,6 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
     // 燈泡
     if (name.includes('bulb')) {
       const isLineBulb = name.includes('line_bulb');
-      const isBallBulb = name.includes('ball_bulb');
 
       if (isLineBulb) {
         if (mesh.material) {
@@ -557,46 +556,6 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
           blending: THREE.AdditiveBlending,
         }));
         outerGlowMesh.position.copy(localCenterGeo);
-        mesh.add(outerGlowMesh);
-      }
-      else if (isBallBulb) {
-        // ── 球型燈泡 ──
-        if (mesh.material) {
-          mesh.material.emissive = new THREE.Color(0xffcc88);
-          mesh.material.emissiveIntensity = 8;
-          if (mesh.material.map) mesh.material.color.setHex(0x888866);
-        }
-
-        // 點光源
-        const pt = new THREE.PointLight(0xffcc88, 2.0, 4.0, 2);
-        mesh.add(pt);
-
-        // 球形光暈（內層）
-        const glowGeo = new THREE.SphereGeometry(0.12, 16, 16);
-        const glowMesh = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
-          color: 0xffcc88,
-          transparent: true,
-          opacity: 0.25,
-          side: THREE.BackSide,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        }));
-        glowMesh.userData.isBallBulbGlow = true;
-        glowMesh.material.userData._baseOpacity = 0.25;
-        mesh.add(glowMesh);
-
-        // 球形光暈（外層）
-        const outerGlowGeo = new THREE.SphereGeometry(0.28, 16, 16);
-        const outerGlowMesh = new THREE.Mesh(outerGlowGeo, new THREE.MeshBasicMaterial({
-          color: 0xffaa44,
-          transparent: true,
-          opacity: 0.08,
-          side: THREE.BackSide,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        }));
-        outerGlowMesh.userData.isBallBulbGlow = true;
-        outerGlowMesh.material.userData._baseOpacity = 0.08;
         mesh.add(outerGlowMesh);
       } else {
         // ── 原本的點燈泡邏輯（維持不變）──
@@ -977,22 +936,19 @@ const BULB_LERP_SPEED = 30.0;
 const bulbMeshes = [];
 
 function collectBulbs() {
-    scene.traverse((obj) => {
-        if (!obj.isMesh || !obj.name.toLowerCase().includes('bulb')) return;
-        const isLineBulb = /line_+bulb/.test(obj.name.toLowerCase());
-        const isBallBulb = obj.name.toLowerCase().includes('ball_bulb');
+  scene.traverse((obj) => {
+    if (!obj.isMesh || !obj.name.toLowerCase().includes('bulb')) return;
+    const isLineBulb = obj.name.toLowerCase().includes('line_bulb');
 
-        if (isLineBulb) {
-            const lights = obj.children.filter(c => c.isPointLight);
-            bulbMeshes.push({ mesh: obj, spot: null, lineLights: lights, ballLight: null });
-        } else if (isBallBulb) {
-            const pt = obj.children.find(c => c.isPointLight) ?? null;
-            bulbMeshes.push({ mesh: obj, spot: null, lineLights: null, ballLight: pt });
-        } else {
-            const spot = obj.children.find(c => c.isSpotLight) ?? null;
-            bulbMeshes.push({ mesh: obj, spot, lineLights: null, ballLight: null });
-        }
-    });
+    if (isLineBulb) {
+      // 收集所有子 PointLight
+      const lights = obj.children.filter(c => c.isPointLight);
+      bulbMeshes.push({ mesh: obj, spot: null, lineLights: lights });
+    } else {
+      const spot = obj.children.find(c => c.isSpotLight) ?? null;
+      bulbMeshes.push({ mesh: obj, spot, lineLights: null });
+    }
+  });
 }
 
 // 掛在 manager.onLoad 之後執行
@@ -1110,26 +1066,19 @@ function applyDayNight(t) {
 }
 
 function applyBulbStrength(s) {
-    bulbMeshes.forEach(({ mesh, spot, lineLights, ballLight }) => {
-        if (mesh.material) {
-            if (lineLights) mesh.material.emissiveIntensity = s * 3;
-            else if (ballLight) mesh.material.emissiveIntensity = s * 8;
-            else mesh.material.emissiveIntensity = s * 10;
-        }
+    bulbMeshes.forEach(({ mesh, spot, lineLights }) => {
+        if (mesh.material) mesh.material.emissiveIntensity = s * (lineLights ? 3 : 10);
         if (spot) spot.intensity = s * 3;
-        if (ballLight) ballLight.intensity = s * 2.0;
         if (lineLights) {
             lineLights.forEach(l => l.intensity = s * 0.3);
+            mesh.children.forEach(c => {
+                if (c.isMesh && c.userData.isLineBulbGlow) {
+                    const base = c.material.userData._baseOpacity ?? 0.1;
+                    c.material.opacity = s > 0.05 ? base : 0;
+                    c.material.needsUpdate = true;
+                }
+            });
         }
-        // 光暈透明度
-        mesh.children.forEach(c => {
-            if (!c.isMesh) return;
-            if (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow) {
-                const base = c.material.userData._baseOpacity ?? 0.1;
-                c.material.opacity = s > 0.05 ? base : 0;
-                c.material.needsUpdate = true;
-            }
-        });
     });
 }
 
