@@ -619,43 +619,43 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
         });
 
       } else if (isRecBulb) {
-        mesh.geometry.computeBoundingBox();
-        const localBox = mesh.geometry.boundingBox;
-        const localSize = new THREE.Vector3();
-        localBox.getSize(localSize);
-        const localCenterGeo = new THREE.Vector3();
-        localBox.getCenter(localCenterGeo);
+  mesh.geometry.computeBoundingBox();
+  const localBox = mesh.geometry.boundingBox;
+  const localSize = new THREE.Vector3();
+  localBox.getSize(localSize);
+  const localCenterGeo = new THREE.Vector3();
+  localBox.getCenter(localCenterGeo);
 
-        // 取得 mesh 的世界方向
-        const worldDir = new THREE.Vector3();
-        mesh.getWorldDirection(worldDir);
+  // 取得 mesh 的世界方向
+  const worldDir = new THREE.Vector3();
+  mesh.getWorldDirection(worldDir);
 
-        // 取得世界座標位置
-        const worldPos = new THREE.Vector3();
-        mesh.getWorldPosition(worldPos);
+  // 取得世界座標位置
+  const worldPos = new THREE.Vector3();
+  mesh.getWorldPosition(worldPos);
 
-        // 取得世界旋轉
-        const worldEuler = new THREE.Euler();
-        worldEuler.setFromQuaternion(mesh.getWorldQuaternion(new THREE.Quaternion()));
+  // 取得世界旋轉
+  const worldEuler = new THREE.Euler();
+  worldEuler.setFromQuaternion(mesh.getWorldQuaternion(new THREE.Quaternion()));
 
-        console.log('=== RecBulb Debug ===');
-        console.log('mesh.name:', mesh.name);
-        console.log('localSize:', localSize);
-        console.log('localCenter:', localCenterGeo);
-        console.log('worldPosition:', worldPos);
-        console.log('worldDirection:', worldDir);
-        console.log('worldRotation (deg):', {
-          x: THREE.MathUtils.radToDeg(worldEuler.x).toFixed(1),
-          y: THREE.MathUtils.radToDeg(worldEuler.y).toFixed(1),
-          z: THREE.MathUtils.radToDeg(worldEuler.z).toFixed(1),
-        });
-        console.log('mesh.rotation (deg):', {
-          x: THREE.MathUtils.radToDeg(mesh.rotation.x).toFixed(1),
-          y: THREE.MathUtils.radToDeg(mesh.rotation.y).toFixed(1),
-          z: THREE.MathUtils.radToDeg(mesh.rotation.z).toFixed(1),
-        });
-        console.log('====================');
-      } else {
+  console.log('=== RecBulb Debug ===');
+  console.log('mesh.name:', mesh.name);
+  console.log('localSize:', localSize);
+  console.log('localCenter:', localCenterGeo);
+  console.log('worldPosition:', worldPos);
+  console.log('worldDirection:', worldDir);
+  console.log('worldRotation (deg):', {
+    x: THREE.MathUtils.radToDeg(worldEuler.x).toFixed(1),
+    y: THREE.MathUtils.radToDeg(worldEuler.y).toFixed(1),
+    z: THREE.MathUtils.radToDeg(worldEuler.z).toFixed(1),
+  });
+  console.log('mesh.rotation (deg):', {
+    x: THREE.MathUtils.radToDeg(mesh.rotation.x).toFixed(1),
+    y: THREE.MathUtils.radToDeg(mesh.rotation.y).toFixed(1),
+    z: THREE.MathUtils.radToDeg(mesh.rotation.z).toFixed(1),
+  });
+  console.log('====================');
+} else {
 
         const wp = new THREE.Vector3();
         mesh.getWorldPosition(wp);
@@ -1362,7 +1362,6 @@ function animate() {
   }
 
   // 移動
-  // 移動
   if (controls.isLocked) {
     velocity.x -= velocity.x * 10.0 * delta;
     velocity.z -= velocity.z * 10.0 * delta;
@@ -1371,12 +1370,6 @@ function animate() {
     direction.normalize();
     if (moveForward || moveBackward) velocity.z -= direction.z * 40.0 * delta;
     if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
-
-    // ── 手機長按前進 ──
-    if (isHoldWalking && !isTouchMoving) {
-      controls.moveForward(3.0 * delta);
-    }
-
     controls.moveForward(-velocity.z * delta);
     controls.moveRight(-velocity.x * delta);
   }
@@ -1405,146 +1398,3 @@ window.addEventListener('resize', () => {
   composer.setSize(w, h);
   labelRenderer.setSize(w, h);
 });
-
-// ─────────────────────────────────────────
-// 十一、手機觸控支援
-// ─────────────────────────────────────────
-
-const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-let isTouchMoving = false;
-let isHoldWalking = false;
-let holdTimer = null;
-
-if (isMobile) {
-  let lastTapTime = 0;
-  let tapTimer = null;
-  let touchStartX = 0, touchStartY = 0;
-  let lastTouchX = 0, lastTouchY = 0;
-  let isMobileLocked = false; // 模擬 PointerLock 的鎖定狀態
-
-  const DOUBLE_TAP_MS = 300;   // 雙點間隔上限
-  const MOVE_THRESHOLD = 8;    // 超過這個 px 就算滑動，不算點擊
-  const TOUCH_SENSITIVITY = 0.003; // 視角靈敏度
-
-  // ── 模擬鎖定狀態（手機不支援 PointerLock）──
-  function mobileLock() {
-    if (isMobileLocked) return;
-    isMobileLocked = true;
-    // 觸發 controls 的 lock 事件讓 UI 同步（隱藏滑桿）
-    sliderWrap.style.opacity = '0';
-    sliderWrap.style.pointerEvents = 'none';
-  }
-
-  function mobileUnlock() {
-    if (!isMobileLocked) return;
-    isMobileLocked = false;
-    if (warningModal.style.display !== 'block') {
-      sliderWrap.style.opacity = '1';
-      sliderWrap.style.pointerEvents = 'auto';
-    }
-  }
-
-  // ── 複寫 controls.isLocked，讓原本邏輯正常運作 ──
-  Object.defineProperty(controls, 'isLocked', {
-    get: () => isMobileLocked,
-    configurable: true,
-  });
-
-  // ── 視角旋轉（拖曳）──
-  renderer.domElement.addEventListener('touchstart', (e) => {
-  if (e.touches.length !== 1) return;
-  const t = e.touches[0];
-  touchStartX = t.clientX;
-  touchStartY = t.clientY;
-  lastTouchX = t.clientX;
-  lastTouchY = t.clientY;
-  isTouchMoving = false;
-
-  // ── 長按計時 ──
-  holdTimer = setTimeout(() => {
-    if (!isTouchMoving) isHoldWalking = true; // 沒有在滑動才啟動前進
-  }, 300);
-}, { passive: true });
-
-  renderer.domElement.addEventListener('touchmove', (e) => {
-    if (e.touches.length !== 1) return;
-    const t = e.touches[0];
-    const dx = t.clientX - lastTouchX;
-    const dy = t.clientY - lastTouchY;
-    lastTouchX = t.clientX;
-    lastTouchY = t.clientY;
-
-    const totalDx = Math.abs(t.clientX - touchStartX);
-    const totalDy = Math.abs(t.clientY - touchStartY);
-    if (totalDx > MOVE_THRESHOLD || totalDy > MOVE_THRESHOLD) {
-      isTouchMoving = true;
-    }
-
-    if (isMobileLocked) {
-      // 水平 → 左右轉頭（yaw）
-      camera.rotation.y -= dx * TOUCH_SENSITIVITY * 2;
-      // 垂直 → 上下看（pitch），限制角度避免翻轉
-      camera.rotation.x -= dy * TOUCH_SENSITIVITY * 2;
-      camera.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, camera.rotation.x));
-    }
-  }, { passive: true });
-
-  renderer.domElement.addEventListener('touchend', (e) => {
-  // 長按停止
-  clearTimeout(holdTimer);
-  isHoldWalking = false;
-  renderer.domElement._prevAvgY = null;
-
-  if (isTouchMoving) return; // 滑動不算點擊
-
-  const now = Date.now();
-  const diff = now - lastTapTime;
-
-  if (diff < DOUBLE_TAP_MS && diff > 0) {
-    clearTimeout(tapTimer);
-    lastTapTime = 0;
-    mobileUnlock();
-    openMenu();
-  } else {
-    lastTapTime = now;
-    tapTimer = setTimeout(() => {
-      if (menuPanel.style.display === 'flex') {
-        closeMenu();
-        mobileLock();
-        return;
-      }
-      if (!isMobileLocked) {
-        mobileLock();
-        return;
-      }
-      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-      const intersects = raycaster.intersectObjects(interactiveDevices);
-      if (!intersects.length) return;
-      const clickEvent = new MouseEvent('click', { bubbles: false });
-      renderer.domElement.dispatchEvent(clickEvent);
-    }, DOUBLE_TAP_MS);
-  }
-}, { passive: true });
-
-  // ── 移動（虛擬搖桿區域）──
-  // 手指雙指觸控：兩指同時滑動 → 前後移動
-  renderer.domElement.addEventListener('touchmove', (e) => {
-    if (e.touches.length !== 2) return;
-    // 雙指向上 → 前進，向下 → 後退
-    const avgY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-    if (!renderer.domElement._prevAvgY) {
-      renderer.domElement._prevAvgY = avgY;
-      return;
-    }
-    const dy = renderer.domElement._prevAvgY - avgY;
-    renderer.domElement._prevAvgY = avgY;
-    if (Math.abs(dy) > 1) {
-      controls.moveForward(dy * 0.02);
-    }
-  }, { passive: true });
-
-  renderer.domElement.addEventListener('touchcancel', () => {
-    clearTimeout(holdTimer);
-    isHoldWalking = false;
-  }, { passive: true });
-}

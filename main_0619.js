@@ -8,7 +8,6 @@ import { CONFIG } from './scene-config.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 
 // ─────────────────────────────────────────
 // 一、全域變數
@@ -323,8 +322,6 @@ labelRenderer.setSize(window.innerWidth, window.innerHeight);
 labelRenderer.domElement.style.cssText = 'position:fixed;top:0;left:0;pointer-events:none;width:100%;height:100%';
 document.body.appendChild(labelRenderer.domElement);
 
-RectAreaLightUniformsLib.init();//
-
 // ─────────────────────────────────────────
 // 四、工具函式
 // ─────────────────────────────────────────
@@ -493,7 +490,6 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
     if (name.includes('bulb')) {
       const isLineBulb = name.includes('line_bulb');
       const isBallBulb = name.includes('ball_bulb');
-      const isRecBulb = name.includes('rec_bulb');
 
       if (isLineBulb) {
         if (mesh.material) {
@@ -567,100 +563,42 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
         // ── 球型燈泡 ──
         if (mesh.material) {
           mesh.material.emissive = new THREE.Color(0xffcc88);
-          mesh.material.emissiveIntensity = 12;
+          mesh.material.emissiveIntensity = 8;
           if (mesh.material.map) mesh.material.color.setHex(0x888866);
         }
 
-        mesh.geometry.computeBoundingBox();
-        const localBox = mesh.geometry.boundingBox;
-        const localSize = new THREE.Vector3();
-        localBox.getSize(localSize);
-        const localCenterGeo = new THREE.Vector3();
-        localBox.getCenter(localCenterGeo);
-
-        const baseRadius = Math.max(localSize.x, localSize.y, localSize.z) * 0.5;
-
-        const pt = new THREE.PointLight(0xffcc88, 4.0, 8.0, 2);
-        pt.position.copy(localCenterGeo);
+        // 點光源
+        const pt = new THREE.PointLight(0xffcc88, 2.0, 4.0, 2);
         mesh.add(pt);
 
-        // 💡 精密微調的發光層次：前段密集重疊以疊出亮度，後段跨度加大並讓不透明度劇烈衰減，完美模擬霧狀淡出
-        const glowLayers = [
-          { radius: baseRadius * 1.05, opacity: 0.45 }, // 最內層貼緊本體
-          { radius: baseRadius * 1.15, opacity: 0.35 }, // 密集疊加層
-          { radius: baseRadius * 1.35, opacity: 0.25 }, // 密集疊加層
-          { radius: baseRadius * 1.70, opacity: 0.16 }, // 中間漸變
-          { radius: baseRadius * 2.30, opacity: 0.09 }, // 擴散開始
-          { radius: baseRadius * 3.20, opacity: 0.04 }, // 邊緣淡出
-          { radius: baseRadius * 4.50, opacity: 0.015 } // 終點柔和消融（加寬半徑，降低不透明度）
-        ];
+        // 球形光暈（內層）
+        const glowGeo = new THREE.SphereGeometry(0.12, 16, 16);
+        const glowMesh = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
+          color: 0xffcc88,
+          transparent: true,
+          opacity: 0.25,
+          side: THREE.BackSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }));
+        glowMesh.userData.isBallBulbGlow = true;
+        glowMesh.material.userData._baseOpacity = 0.25;
+        mesh.add(glowMesh);
 
-        glowLayers.forEach(({ radius, opacity }) => {
-          // 💡 調整一：段數從 16 提升到 32，消除多邊形硬邊
-          const geo = new THREE.SphereGeometry(radius, 32, 32);
-
-          const mat = new THREE.MeshBasicMaterial({
-            color: 0xffcc88,
-            transparent: true,
-            opacity,
-            side: THREE.BackSide,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending,
-
-            // 🔥 調整二：開啟 Dithering（抖動防斷層），這是消除黑色背景下洋蔥圈痕跡的核心關鍵
-            dithering: true
-          });
-
-          const m = new THREE.Mesh(geo, mat);
-          m.userData.isBallBulbGlow = true;
-          m.material.userData._baseOpacity = opacity;
-          m.position.copy(localCenterGeo);
-          mesh.add(m);
-        });
-
-      } else if (isRecBulb) {
-        mesh.geometry.computeBoundingBox();
-        const localBox = mesh.geometry.boundingBox;
-        const localSize = new THREE.Vector3();
-        localBox.getSize(localSize);
-        const localCenterGeo = new THREE.Vector3();
-        localBox.getCenter(localCenterGeo);
-
-        // 取得 mesh 的世界方向
-        const worldDir = new THREE.Vector3();
-        mesh.getWorldDirection(worldDir);
-
-        // 取得世界座標位置
-        const worldPos = new THREE.Vector3();
-        mesh.getWorldPosition(worldPos);
-
-        // 取得世界旋轉
-        const worldEuler = new THREE.Euler();
-        worldEuler.setFromQuaternion(mesh.getWorldQuaternion(new THREE.Quaternion()));
-
-        console.log('=== RecBulb Debug ===');
-        console.log('mesh.name:', mesh.name);
-        console.log('localSize:', localSize);
-        console.log('localCenter:', localCenterGeo);
-        console.log('worldPosition:', worldPos);
-        console.log('worldDirection:', worldDir);
-        console.log('worldRotation (deg):', {
-          x: THREE.MathUtils.radToDeg(worldEuler.x).toFixed(1),
-          y: THREE.MathUtils.radToDeg(worldEuler.y).toFixed(1),
-          z: THREE.MathUtils.radToDeg(worldEuler.z).toFixed(1),
-        });
-        console.log('mesh.rotation (deg):', {
-          x: THREE.MathUtils.radToDeg(mesh.rotation.x).toFixed(1),
-          y: THREE.MathUtils.radToDeg(mesh.rotation.y).toFixed(1),
-          z: THREE.MathUtils.radToDeg(mesh.rotation.z).toFixed(1),
-        });
-        console.log('====================');
+        // 球形光暈（外層）
+        const outerGlowGeo = new THREE.SphereGeometry(0.28, 16, 16);
+        const outerGlowMesh = new THREE.Mesh(outerGlowGeo, new THREE.MeshBasicMaterial({
+          color: 0xffaa44,
+          transparent: true,
+          opacity: 0.08,
+          side: THREE.BackSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }));
+        outerGlowMesh.userData.isBallBulbGlow = true;
+        outerGlowMesh.material.userData._baseOpacity = 0.08;
+        mesh.add(outerGlowMesh);
       } else {
-
-        const wp = new THREE.Vector3();
-        mesh.getWorldPosition(wp);
-        console.log(`[bulb] ${name} 世界座標: x=${wp.x.toFixed(2)} y=${wp.y.toFixed(2)} z=${wp.z.toFixed(2)}`);
-
         // ── 原本的點燈泡邏輯（維持不變）──
         if (mesh.material) {
           mesh.material.emissive = new THREE.Color(0xffaa44);
@@ -1039,28 +977,23 @@ const BULB_LERP_SPEED = 30.0;
 const bulbMeshes = [];
 
 function collectBulbs() {
-  scene.traverse((obj) => {
-    if (!obj.isMesh || !obj.name.toLowerCase().includes('bulb')) return;
-    const name = obj.name.toLowerCase();
-    const isLineBulb = /line_+bulb/.test(name);
-    const isBallBulb = name.includes('ball_bulb');
-    const isRecBulb = name.includes('rec_bulb');
+    scene.traverse((obj) => {
+        if (!obj.isMesh || !obj.name.toLowerCase().includes('bulb')) return;
+        const isLineBulb = /line_+bulb/.test(obj.name.toLowerCase());
+        const isBallBulb = obj.name.toLowerCase().includes('ball_bulb');
 
-    if (isLineBulb) {
-      const lights = obj.children.filter(c => c.isPointLight);
-      bulbMeshes.push({ mesh: obj, spot: null, lineLights: lights, ballLight: null, rectLight: null });
-    } else if (isBallBulb) {
-      const pt = obj.children.find(c => c.isPointLight) ?? null;
-      bulbMeshes.push({ mesh: obj, spot: null, lineLights: null, ballLight: pt, rectLight: null });
-    } else if (isRecBulb) {
-      const rl = obj.children.find(c => c.isRectAreaLight) ?? null;
-      bulbMeshes.push({ mesh: obj, spot: null, lineLights: null, ballLight: null, rectLight: rl });
-    } else {
-      const spot = obj.children.find(c => c.isSpotLight) ?? null;
-      bulbMeshes.push({ mesh: obj, spot, lineLights: null, ballLight: null, rectLight: null });
-    }
-  });
-};
+        if (isLineBulb) {
+            const lights = obj.children.filter(c => c.isPointLight);
+            bulbMeshes.push({ mesh: obj, spot: null, lineLights: lights, ballLight: null });
+        } else if (isBallBulb) {
+            const pt = obj.children.find(c => c.isPointLight) ?? null;
+            bulbMeshes.push({ mesh: obj, spot: null, lineLights: null, ballLight: pt });
+        } else {
+            const spot = obj.children.find(c => c.isSpotLight) ?? null;
+            bulbMeshes.push({ mesh: obj, spot, lineLights: null, ballLight: null });
+        }
+    });
+}
 
 // 掛在 manager.onLoad 之後執行
 const _origOnLoad = manager.onLoad;
@@ -1174,31 +1107,31 @@ function applyDayNight(t) {
 
   // ✅ 新的（固定原始亮度）：
   //targetBulbStrength = n <= 0.50 ? 1.0 : 0.0;
-};
+}
 
 function applyBulbStrength(s) {
-  bulbMeshes.forEach(({ mesh, spot, lineLights, ballLight, rectLight }) => {
-    if (mesh.material) {
-      if (lineLights) mesh.material.emissiveIntensity = s * 3;
-      else if (ballLight) mesh.material.emissiveIntensity = s * 12;
-      else if (rectLight) mesh.material.emissiveIntensity = s * 3;
-      else mesh.material.emissiveIntensity = s * 10;
-    }
-    if (spot) spot.intensity = s * 3;
-    if (ballLight) ballLight.intensity = s * 4.0;
-    if (rectLight) rectLight.intensity = s * 3;
-    if (lineLights) lineLights.forEach(l => l.intensity = s * 0.3);
-
-    mesh.children.forEach(c => {
-      if (!c.isMesh) return;
-      if (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow || c.userData.isRecBulbGlow) {
-        const base = c.material.userData._baseOpacity ?? 0.1;
-        c.material.opacity = s > 0.05 ? base : 0;
-        c.material.needsUpdate = true;
-      }
+    bulbMeshes.forEach(({ mesh, spot, lineLights, ballLight }) => {
+        if (mesh.material) {
+            if (lineLights) mesh.material.emissiveIntensity = s * 3;
+            else if (ballLight) mesh.material.emissiveIntensity = s * 8;
+            else mesh.material.emissiveIntensity = s * 10;
+        }
+        if (spot) spot.intensity = s * 3;
+        if (ballLight) ballLight.intensity = s * 2.0;
+        if (lineLights) {
+            lineLights.forEach(l => l.intensity = s * 0.3);
+        }
+        // 光暈透明度
+        mesh.children.forEach(c => {
+            if (!c.isMesh) return;
+            if (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow) {
+                const base = c.material.userData._baseOpacity ?? 0.1;
+                c.material.opacity = s > 0.05 ? base : 0;
+                c.material.needsUpdate = true;
+            }
+        });
     });
-  });
-};
+}
 
 daySlider.addEventListener('input', () => applyDayNight(parseFloat(daySlider.value)));
 daySlider.addEventListener('mousedown', e => e.stopPropagation());
@@ -1362,7 +1295,6 @@ function animate() {
   }
 
   // 移動
-  // 移動
   if (controls.isLocked) {
     velocity.x -= velocity.x * 10.0 * delta;
     velocity.z -= velocity.z * 10.0 * delta;
@@ -1371,12 +1303,6 @@ function animate() {
     direction.normalize();
     if (moveForward || moveBackward) velocity.z -= direction.z * 40.0 * delta;
     if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
-
-    // ── 手機長按前進 ──
-    if (isHoldWalking && !isTouchMoving) {
-      controls.moveForward(3.0 * delta);
-    }
-
     controls.moveForward(-velocity.z * delta);
     controls.moveRight(-velocity.x * delta);
   }
@@ -1405,146 +1331,3 @@ window.addEventListener('resize', () => {
   composer.setSize(w, h);
   labelRenderer.setSize(w, h);
 });
-
-// ─────────────────────────────────────────
-// 十一、手機觸控支援
-// ─────────────────────────────────────────
-
-const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-let isTouchMoving = false;
-let isHoldWalking = false;
-let holdTimer = null;
-
-if (isMobile) {
-  let lastTapTime = 0;
-  let tapTimer = null;
-  let touchStartX = 0, touchStartY = 0;
-  let lastTouchX = 0, lastTouchY = 0;
-  let isMobileLocked = false; // 模擬 PointerLock 的鎖定狀態
-
-  const DOUBLE_TAP_MS = 300;   // 雙點間隔上限
-  const MOVE_THRESHOLD = 8;    // 超過這個 px 就算滑動，不算點擊
-  const TOUCH_SENSITIVITY = 0.003; // 視角靈敏度
-
-  // ── 模擬鎖定狀態（手機不支援 PointerLock）──
-  function mobileLock() {
-    if (isMobileLocked) return;
-    isMobileLocked = true;
-    // 觸發 controls 的 lock 事件讓 UI 同步（隱藏滑桿）
-    sliderWrap.style.opacity = '0';
-    sliderWrap.style.pointerEvents = 'none';
-  }
-
-  function mobileUnlock() {
-    if (!isMobileLocked) return;
-    isMobileLocked = false;
-    if (warningModal.style.display !== 'block') {
-      sliderWrap.style.opacity = '1';
-      sliderWrap.style.pointerEvents = 'auto';
-    }
-  }
-
-  // ── 複寫 controls.isLocked，讓原本邏輯正常運作 ──
-  Object.defineProperty(controls, 'isLocked', {
-    get: () => isMobileLocked,
-    configurable: true,
-  });
-
-  // ── 視角旋轉（拖曳）──
-  renderer.domElement.addEventListener('touchstart', (e) => {
-  if (e.touches.length !== 1) return;
-  const t = e.touches[0];
-  touchStartX = t.clientX;
-  touchStartY = t.clientY;
-  lastTouchX = t.clientX;
-  lastTouchY = t.clientY;
-  isTouchMoving = false;
-
-  // ── 長按計時 ──
-  holdTimer = setTimeout(() => {
-    if (!isTouchMoving) isHoldWalking = true; // 沒有在滑動才啟動前進
-  }, 300);
-}, { passive: true });
-
-  renderer.domElement.addEventListener('touchmove', (e) => {
-    if (e.touches.length !== 1) return;
-    const t = e.touches[0];
-    const dx = t.clientX - lastTouchX;
-    const dy = t.clientY - lastTouchY;
-    lastTouchX = t.clientX;
-    lastTouchY = t.clientY;
-
-    const totalDx = Math.abs(t.clientX - touchStartX);
-    const totalDy = Math.abs(t.clientY - touchStartY);
-    if (totalDx > MOVE_THRESHOLD || totalDy > MOVE_THRESHOLD) {
-      isTouchMoving = true;
-    }
-
-    if (isMobileLocked) {
-      // 水平 → 左右轉頭（yaw）
-      camera.rotation.y -= dx * TOUCH_SENSITIVITY * 2;
-      // 垂直 → 上下看（pitch），限制角度避免翻轉
-      camera.rotation.x -= dy * TOUCH_SENSITIVITY * 2;
-      camera.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, camera.rotation.x));
-    }
-  }, { passive: true });
-
-  renderer.domElement.addEventListener('touchend', (e) => {
-  // 長按停止
-  clearTimeout(holdTimer);
-  isHoldWalking = false;
-  renderer.domElement._prevAvgY = null;
-
-  if (isTouchMoving) return; // 滑動不算點擊
-
-  const now = Date.now();
-  const diff = now - lastTapTime;
-
-  if (diff < DOUBLE_TAP_MS && diff > 0) {
-    clearTimeout(tapTimer);
-    lastTapTime = 0;
-    mobileUnlock();
-    openMenu();
-  } else {
-    lastTapTime = now;
-    tapTimer = setTimeout(() => {
-      if (menuPanel.style.display === 'flex') {
-        closeMenu();
-        mobileLock();
-        return;
-      }
-      if (!isMobileLocked) {
-        mobileLock();
-        return;
-      }
-      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-      const intersects = raycaster.intersectObjects(interactiveDevices);
-      if (!intersects.length) return;
-      const clickEvent = new MouseEvent('click', { bubbles: false });
-      renderer.domElement.dispatchEvent(clickEvent);
-    }, DOUBLE_TAP_MS);
-  }
-}, { passive: true });
-
-  // ── 移動（虛擬搖桿區域）──
-  // 手指雙指觸控：兩指同時滑動 → 前後移動
-  renderer.domElement.addEventListener('touchmove', (e) => {
-    if (e.touches.length !== 2) return;
-    // 雙指向上 → 前進，向下 → 後退
-    const avgY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-    if (!renderer.domElement._prevAvgY) {
-      renderer.domElement._prevAvgY = avgY;
-      return;
-    }
-    const dy = renderer.domElement._prevAvgY - avgY;
-    renderer.domElement._prevAvgY = avgY;
-    if (Math.abs(dy) > 1) {
-      controls.moveForward(dy * 0.02);
-    }
-  }, { passive: true });
-
-  renderer.domElement.addEventListener('touchcancel', () => {
-    clearTimeout(holdTimer);
-    isHoldWalking = false;
-  }, { passive: true });
-}
