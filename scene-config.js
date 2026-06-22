@@ -1,9 +1,12 @@
 // scene-config.js
+const isGitHub = window.location.hostname.includes('github.io');
+const basePath = isGitHub ? '/3D_Module_Web/' : './';
+
 export const CONFIG = {
     MODELS: {
-        PLANT: 'models/Plant_Turtle_LOD.glb',
-        BUILDING: 'models/20260530.glb',
-        HDRI: 'hdri/studio.exr'
+        PLANT: `${basePath}models/Plant_Turtle_LOD.glb`,
+        BUILDING: `${basePath}models/20260530.glb`,
+        HDRI: `${basePath}hdri/studio.exr`
     },
     ROOM_DATA: {
         "in_door1": "會議室 101",
