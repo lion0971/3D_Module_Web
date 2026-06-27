@@ -21,8 +21,6 @@ const direction = new THREE.Vector3();
 const collidableObjects = [];
 const raycaster = new THREE.Raycaster();
 const interactiveDevices = [];
-window.interactiveDevices = interactiveDevices;//console測試
-
 const flowingPipes = new Map();
 const outletObjects = {};   // faucet_outlet / faucet_2_outlet / shower_outlet / shower_2_outlet ...
 const waterFlows = {};      // WaterFlow 實例，key 為完整裝置名稱
@@ -38,59 +36,12 @@ const activeTimers = {};
 
 const drainFlows = {};   // DrainFlow 實例，key 為 drain 物件名稱
 
-// ── 新增：管路配置表（依附件二） ──
-const PIPE_CONFIG = {
-  // 廚房出水
-  'kit_faucet_1': {
-    outletKey: 'kit_faucet_1_outlet',
-    drainKey: 'kit_faucet_1_drain',
-    coldPipes: ['pipe_main', 'pipe_kit', 'pipe_kit_faucet_1'],
-    hotPipes: ['pipe_main_w', 'pipe_kit_w', 'pipe_kit_faucet_1_w'],
-    type: 'faucet',
-  },
-  'kit_faucet_2': {
-    outletKey: 'kit_faucet_2_outlet',
-    drainKey: 'kit_faucet_2_drain',
-    coldPipes: ['pipe_main', 'pipe_kit', 'pipe_kit_faucet_2'],
-    hotPipes: ['pipe_main_w', 'pipe_kit_w', 'pipe_kit_faucet_2_w'],
-    type: 'faucet',
-  },
-  // 浴室出水
-  'restroom_shower': {
-    outletKey: 'restroom_shower_outlet',
-    drainKey: 'restroom_shower_drain',
-    coldPipes: ['pipe_main', 'pipe_restroom', 'pipe_restroom_st', 'pipe_restroom_shower'],
-    hotPipes: ['pipe_main_w', 'pipe_restroom_w', 'pipe_restroom_shower_w'],
-    type: 'shower',
-  },
-  'restroom_toilet': {
-    outletKey: 'restroom_toilet_outlet',
-    drainKey: 'restroom_toilet_drain',
-    drainRadius: 0.10,
-    coldPipes: ['pipe_main', 'pipe_restroom', 'pipe_restroom_st', 'pipe_restroom_toilet'],
-    hotPipes: ['pipe_restroom_toilet_w'],
-    type: 'faucet',
-  },
-  'restroom_faucet': {
-    outletKey: 'restroom_faucet_outlet',
-    drainKey: 'restroom_faucet_drain',
-    coldPipes: ['pipe_main', 'pipe_restroom', 'pipe_restroom_faucet'],
-    hotPipes: ['pipe_main_w', 'pipe_restroom_w', 'pipe_restroom_faucet_w'],
-    type: 'faucet',
-  },
-};
-
-// 共用幹管（會被多個裝置同時使用）
-const SHARED_COLD_PIPES = new Set(['pipe_main', 'pipe_kit', 'pipe_restroom', 'pipe_restroom_st']);
-const SHARED_HOT_PIPES = new Set(['pipe_main_w', 'pipe_kit_w', 'pipe_restroom_w']);
-
-// 替換舊的 DEVICE_LABEL
 const DEVICE_LABEL = {
-  'kit_faucet_1': '廚房水龍頭1',
-  'kit_faucet_2': '廚房水龍頭2',
-  'restroom_shower': '浴室蓮蓬頭',
-  'restroom_toilet': '浴室馬桶',
-  'restroom_faucet': '浴室洗手台',
+  'faucet': '洗手台水龍頭',
+  'faucet_2': '浴缸水龍頭',
+  'shower': '淋浴蓮蓬頭',
+  'shower_2': '浴缸蓮蓬頭',
+  // 依實際場景命名增加
 };
 
 // ─────────────────────────────────────────
@@ -343,9 +294,6 @@ class DrainFlow {
 // 三、場景、渲染器、後處理
 // ─────────────────────────────────────────
 const scene = new THREE.Scene();
-
-window.scene = scene;//console測試
-
 const camera = new THREE.PerspectiveCamera(
   CONFIG.CAMERA.fov,
   window.innerWidth / window.innerHeight,
@@ -387,10 +335,10 @@ RectAreaLightUniformsLib.init();//
  * 'faucet' | 'faucet_2' | 'faucet_3' → 'faucet'
  * 'shower' | 'shower_2'              → 'shower'
  */
-// 替換舊版（只識別 faucet/shower 前綴）
 function getDeviceType(name) {
-  const cfg = PIPE_CONFIG[name];
-  return cfg ? cfg.type : null;
+  if (name.startsWith('faucet')) return 'faucet';
+  if (name.startsWith('shower')) return 'shower';
+  return null;
 }
 
 function createConeVolumetricLight(color) {
@@ -428,13 +376,16 @@ function createConeVolumetricLight(color) {
 }
 
 function setupPipeMaterial(mesh, baseColor = 0x00aaff, emissiveColor = 0x0055ff) {
-  mesh.material = new THREE.MeshBasicMaterial({
+  mesh.material = new THREE.MeshStandardMaterial({
     color: baseColor,
     transparent: true,
-    opacity: 0.12,
-    side: THREE.FrontSide,   // ← 改 FrontSide，消除背面自疊加
+    opacity: 0.03,//原0.05
+    emissive: new THREE.Color(emissiveColor),
+    emissiveIntensity: 0,
+    roughness: 0.1,
+    metalness: 0.1,
+    side: THREE.DoubleSide,
     depthWrite: false,
-    blending: THREE.NormalBlending,
   });
 }
 
@@ -443,16 +394,13 @@ function setupPipeMaterial(mesh, baseColor = 0x00aaff, emissiveColor = 0x0055ff)
  * @param {string} deviceName 完整裝置名稱，如 'faucet', 'faucet_2', 'shower_2'
  */
 function _createWaterFlow(deviceName) {
-  const cfg = PIPE_CONFIG[deviceName];
-  if (!cfg) {
-    console.warn(`[WaterFlow] ${deviceName} 不在 PIPE_CONFIG，跳過`);
-    return;
-  }
-
+  const outletKey = `${deviceName}_outlet`;  // faucet_outlet / faucet_2_outlet
+  const deviceType = getDeviceType(deviceName); // 'faucet' | 'shower'
   let emitPos;
-  if (outletObjects[cfg.outletKey]) {
+
+  if (outletObjects[outletKey]) {
     emitPos = new THREE.Vector3();
-    outletObjects[cfg.outletKey].getWorldPosition(emitPos);
+    outletObjects[outletKey].getWorldPosition(emitPos);
     console.log(`[WaterFlow] ${deviceName} outlet 座標`, emitPos);
   } else {
     const deviceMesh = interactiveDevices.find(m => m.name.toLowerCase() === deviceName);
@@ -466,9 +414,10 @@ function _createWaterFlow(deviceName) {
       box.min.y,
       (box.min.z + box.max.z) / 2
     );
+    console.log(`[WaterFlow] ${deviceName} bounding box 座標`, emitPos);
   }
 
-  waterFlows[deviceName] = new WaterFlow(scene, emitPos, cfg.type);
+  waterFlows[deviceName] = new WaterFlow(scene, emitPos, deviceType);
 }
 
 // ─────────────────────────────────────────
@@ -536,34 +485,21 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
   gltf.scene.updateMatrixWorld(true);
 
   // ── 第一遍：收集 outlet 空物件 ────────────────────────────
+  // 匹配：faucet_outlet / faucet_2_outlet / shower_outlet / shower_2_outlet ...
   gltf.scene.traverse((obj) => {
     const name = obj.name.toLowerCase();
-    if (Object.values(PIPE_CONFIG).some(cfg => cfg.outletKey === name)) {
+    if (/^(faucet|shower)(_\d+)?_outlet$/.test(name)) {
       outletObjects[name] = obj;
       console.log(`[Outlet] ${name}`, obj.getWorldPosition(new THREE.Vector3()));
     }
   });
 
-  // ✅ 在第二遍 traverse 之前預先建立集合（不要放在 traverse 裡面）
-  const allColdPipeNames = new Set(
-    Object.values(PIPE_CONFIG).flatMap(cfg => cfg.coldPipes)
-  );
-  const allHotPipeNames = new Set(
-    Object.values(PIPE_CONFIG).flatMap(cfg => cfg.hotPipes)
-  );
-
   // ── 第二遍：處理 mesh ─────────────────────────────────────
+
+
   gltf.scene.traverse((mesh) => {
     if (!mesh.isMesh) return;
     const name = mesh.name.toLowerCase();
-
-    if (name.includes('pipe')) {
-      console.log(
-        `[pipe mesh] 原始名稱: "${mesh.name}"`,
-        `| isCold: ${allColdPipeNames.has(name)}`,
-        `| isHot: ${allHotPipeNames.has(name)}`
-      );
-    }
 
     if (name.includes('drain')) console.log(`[Debug] drain mesh 名稱: "${name}"`);
 
@@ -755,24 +691,28 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
       }
     }
 
-    // ✅ 設備識別
-    if (PIPE_CONFIG[name]) {
+    // ✅ 設備：faucet / faucet_2 / shower / shower_2 ...
+    // traverse 中 — 改這行 regex
+
+    if (/^(faucet|shower)(_\d+)?$/.test(name)) {
       interactiveDevices.push(mesh);
       activeTimers[name] = { startTime: null, alerted: false };
       console.log(`[Device] ${name}`);
     }
 
-    // ✅ 管路識別（放在 traverse 裡，name 已存在）
-    const isColdPipe = allColdPipeNames.has(name);
-    const isHotPipe = allHotPipeNames.has(name);
+    // ✅ 冷水管：pipe_faucet / pipe_faucet_2 / pipe_shower / pipe_shower_2 / pipe_restroom
+    const isColdPipe = /^pipe_(faucet|shower)(_\d+)?$/.test(name) || name === 'pipe_restroom';
+
+    // ✅ 熱水管：pipe_faucet_w / pipe_faucet_2_w / pipe_shower_w / pipe_shower_2_w / pipe_restroom_w
+    const isHotPipe = /^pipe_(faucet|shower)(_\d+)?_w$/.test(name) || name === 'pipe_restroom_w';
 
     if (isColdPipe) {
-      setupPipeMaterial(mesh);                      // 藍色
+      setupPipeMaterial(mesh);                     // 藍色
       flowingPipes.set(name, { mesh, active: false });
       console.log(`[Pipe] ${name}`);
     }
     if (isHotPipe) {
-      setupPipeMaterial(mesh, 0xff6600, 0xff3300);  // 橘色
+      setupPipeMaterial(mesh, 0xff6600, 0xff3300); // 橘色
       flowingPipes.set(name, { mesh, active: false });
       console.log(`[HotPipe] ${name}`);
     }
@@ -782,30 +722,32 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
       collidableObjects.push(mesh);
     }
 
-    // ✅ drain 識別
-    if (Object.values(PIPE_CONFIG).some(cfg => cfg.drainKey === name)) {
+    // ✅ 排水口 sphere：drain / drain_2 / drain_3 ...
+    if (/^drain_(faucet|shower)(_\d+)?$/.test(name)) {
       const worldPos = new THREE.Vector3();
       mesh.getWorldPosition(worldPos);
+
+      // 讓球體本身保持可見但半透明，強化視覺提示
       if (mesh.material) {
         mesh.material = new THREE.MeshStandardMaterial({
-          color: 0xff9d1a, transparent: true, opacity: 0.25,
-          roughness: 0.1, metalness: 0.6, depthWrite: false,
+          color: 0xff9d1a,
+          transparent: true,
+          opacity: 0.25,
+          roughness: 0.1,
+          metalness: 0.6,
+          depthWrite: false,
         });
       }
-      const drainRadius = name.includes('shower') ? 0.6 : 0.25;
+
+      // ✅ 依名稱判斷漩渦大小
+      const drainRadius = name.includes('faucet') ? 0.25 : 0.6;
       drainFlows[name] = new DrainFlow(scene, worldPos, drainRadius);
+      // 將該排水效果的 Y 軸縮放比例設得非常低（例如原本的 1% 或更低），讓它扁平化
       console.log(`[Drain] ${name}`, worldPos);
     }
   });
 
-  // ✅ 貼在這裡 ↓
-  gltf.scene.traverse((obj) => {
-    if (obj.name.toLowerCase().includes('toilet')) {
-      console.log('[toilet ALL]', obj.name, obj.type, obj.isMesh);
-    }
-  });
-
-  // ✅ 建立水流
+  // ✅ 自動為所有偵測到的設備建立水流（支援任意數量）
   interactiveDevices.forEach(mesh => {
     _createWaterFlow(mesh.name.toLowerCase());
   });
@@ -906,106 +848,27 @@ function closeMenu() {
 
 // ── 補回這個函式 ──
 function toggleXRayMode(enable) {
-  // ── 開啟管路透視模式下關閉太陽 ──
-  if (enable) {
-    sunLight.userData._xray_intensity = sunLight.intensity;
-    sunLight.intensity = 0;
-    sunMesh.visible = false;
-  } else {
-    sunLight.intensity = sunLight.userData._xray_intensity ?? sunLight.intensity;
-    sunMesh.visible = true;
-  };
-
-  // ── 管路透視模式下背景切換 ──
-  if (enable) {
-    scene.userData._origBackground = scene.background;
-    scene.background = new THREE.Color(0x000000);  // 純黑背景
-  } else {
-    scene.background = scene.userData._origBackground ?? null;
-  }
-
-  // ── 環境貼圖切換（避免 HDR 反射讓管路發亮）──
-  // if (enable) {
-  //   scene.userData._origEnvironment = scene.environment;
-  //   scene.environment = null;
-  // } else {
-  //   scene.environment = scene.userData._origEnvironment ?? null;
-  // }
-
-  // ── 燈泡：直接 traverse 確保不漏掉 ──
-  scene.traverse((obj) => {
-    const n = obj.name.toLowerCase();
-    if (!n.includes('bulb')) return;
-
-    // 關閉 emissive
-    if (obj.isMesh && obj.material) {
-      if (enable) {
-        obj.material.userData._xray_emissive = obj.material.emissiveIntensity;
-        obj.material.emissiveIntensity = 0;
-      } else {
-        obj.material.emissiveIntensity =
-          obj.material.userData._xray_emissive ?? obj.material.emissiveIntensity;
-      }
-      obj.material.needsUpdate = true;
-    }
-
-    // 關閉所有燈光子物件（PointLight / SpotLight / RectAreaLight）
-    obj.children.forEach(c => {
-      if (c.isLight) {
-        if (enable) {
-          c.userData._xray_intensity = c.intensity;
-          c.intensity = 0;
-        } else {
-          c.intensity = c.userData._xray_intensity ?? c.intensity;
-        }
-      }
-      // 關閉光暈 mesh
-      if (c.isMesh && (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow)) {
-        c.visible = !enable;
-      }
-    });
-  });
-  // ── 管路透視模式下燈泡關閉 / 恢復 ──
-  // if (enable) {
-  //   // 強制設為 0，不改 targetBulbStrength 的「正確值」
-  //   applyBulbStrength(0);
-  // } else {
-  //   // 恢復至目前應有的亮度
-  //   applyBulbStrength(currentBulbStrength);
-  // }
-
   const processedMaterials = new Set();
   scene.traverse((obj) => {
     if (!obj.isMesh) return;
     const name = obj.name.toLowerCase();
     const isPipe = name.includes('measure') || name.includes('pipe');
-    const isDevice = interactiveDevices.includes(obj)
-      || Object.keys(PIPE_CONFIG).some(key => name.includes(key))
-      || name.includes('bulb');
+    const isDevice = interactiveDevices.includes(obj) || name.includes('bulb');
     if (isDevice) return;
 
     const mat = obj.material;
+    if (processedMaterials.has(mat)) return;
+    processedMaterials.add(mat);
 
-    // ── pipe 不走 processedMaterials 過濾，每個 mesh 獨立處理 ──
     // ── 管路：只調整「目前未啟動」的管路，啟動中的保持 0.75 不動 ──
     if (isPipe) {
       const pipeEntry = flowingPipes.get(name);
       if (pipeEntry && !pipeEntry.active) {
-        if (enable) {
-          mat.opacity = 0.45;
-          mat.emissiveIntensity = 0.3 + Math.sin(performance.now() * 0.001) * 0.1; // 靜態給初始值即可
-        } else {
-          mat.opacity = 0.03;
-          mat.emissiveIntensity = 0;
-        }
+        mat.opacity = enable ? 0.45 : 0.03;//原0.05
         mat.needsUpdate = true;
       }
       return;
     }
-
-    // ── 非 pipe 物件才做去重處理 ──
-    if (processedMaterials.has(mat)) return;
-    processedMaterials.add(mat);
 
     if (enable) {
       mat.userData._origOpacity = mat.opacity;
@@ -1099,45 +962,57 @@ Object.assign(warningOffBtn.style, {
 });
 warningOffBtn.onclick = () => {
   const deviceName = warningOffBtn.dataset.device;
-  const cfg = PIPE_CONFIG[deviceName];
-  if (!cfg) return;
 
-  cfg.coldPipes.forEach(pipeName => {
-    const p = flowingPipes.get(pipeName);
-    if (!p) return;
-    const stillUsed = Object.entries(PIPE_CONFIG).some(([dName, dCfg]) => {
-      if (dName === deviceName) return false;
-      if (!dCfg.coldPipes.includes(pipeName)) return false;
-      const endPipe = flowingPipes.get(dCfg.coldPipes[dCfg.coldPipes.length - 1]);
-      return endPipe?.active ?? false;
-    });
-    if (!stillUsed) {
-      p.active = false;
-      p.mesh.material.opacity = getInactivePipeOpacity();
-    }
-  });
+  // ── 關冷水管 ──
+  const pipe = flowingPipes.get(`pipe_${deviceName}`);
+  if (pipe) {
+    pipe.active = false;
+    pipe.mesh.material.opacity = getInactivePipeOpacity();
+    pipe.mesh.material.emissiveIntensity = 0;
+    waterFlows[deviceName]?.setActive(false);
+  }
 
-  cfg.hotPipes.forEach(pipeName => {
-    const p = flowingPipes.get(pipeName);
-    if (!p) return;
-    const stillUsed = Object.entries(PIPE_CONFIG).some(([dName, dCfg]) => {
-      if (dName === deviceName) return false;
-      if (!dCfg.hotPipes.includes(pipeName)) return false;
-      const endPipe = flowingPipes.get(dCfg.coldPipes[dCfg.coldPipes.length - 1]);
-      return endPipe?.active ?? false;
-    });
-    if (!stillUsed) {
-      p.active = false;
-      p.mesh.material.opacity = getInactivePipeOpacity();
-    }
-  });
+  // ── 關熱水管 ──
+  const hotPipe = flowingPipes.get(`pipe_${deviceName}_w`);
+  if (hotPipe) {
+    hotPipe.active = false;
+    pipe.mesh.material.opacity = getInactivePipeOpacity();
+    hotPipe.mesh.material.emissiveIntensity = 0;
+  }
 
-  waterFlows[deviceName]?.setActive(false);
-  drainFlows[cfg.drainKey]?.setActive(false);
+  // ── 關排水漩渦 ──
+  const drainKey = `drain_${deviceName}`;
+  drainFlows[drainKey]?.setActive(false);
 
+  // ── 重設計時器 ──
   if (activeTimers[deviceName]) {
     activeTimers[deviceName].startTime = null;
     activeTimers[deviceName].alerted = false;
+  }
+
+  // ── 同步幹管 ──
+  let anyActive = false;
+  flowingPipes.forEach((p, key) => {
+    if (key !== 'pipe_restroom' && key !== 'pipe_restroom_w' && !key.endsWith('_w') && p.active) {
+      anyActive = true;
+    }
+  });
+  const total = flowingPipes.get('pipe_restroom');
+  if (total) {
+    total.active = anyActive;
+    total.mesh.material.opacity = anyActive ? 0.6 : getInactivePipeOpacity();
+    total.mesh.material.emissiveIntensity = anyActive ? undefined : 0;
+  }
+
+  let anyHotActive = false;
+  flowingPipes.forEach((p, key) => {
+    if (key.endsWith('_w') && key !== 'pipe_restroom_w' && p.active) anyHotActive = true;
+  });
+  const totalHot = flowingPipes.get('pipe_restroom_w');
+  if (totalHot) {
+    totalHot.active = anyHotActive;
+    totalHot.mesh.material.opacity = anyHotActive ? 0.6 : getInactivePipeOpacity();
+    totalHot.mesh.material.emissiveIntensity = anyHotActive ? undefined : 0;
   }
 
   warningModal.style.display = 'none';
@@ -1358,11 +1233,9 @@ controls.addEventListener('unlock', () => {
   if (warningModal.style.display !== 'block') {
     sliderWrap.style.opacity = '1';
     sliderWrap.style.pointerEvents = 'auto';
-    menuPanel.style.display = 'flex'
   }
 });
 
-// 已鎖定 → 正常 raycaster 互動
 renderer.domElement.addEventListener('click', () => {
   // 選單開著 → 左鍵關選單
   if (menuPanel.style.display === 'flex') {
@@ -1370,82 +1243,88 @@ renderer.domElement.addEventListener('click', () => {
     return;
   }
 
-  // 未鎖定 → 左鍵鎖定
+  // 未鎖定 → 左鍵鎖定，不做其他事
   if (!controls.isLocked) {
     controls.lock();
     return;
   }
 
-  // 已鎖定 → raycaster 互動
+  // 已鎖定 → 正常 raycaster 互動
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
   const intersects = raycaster.intersectObjects(interactiveDevices);
   if (!intersects.length) return;
 
-  const targetName = intersects[0].object.name.toLowerCase();
-  const cfg = PIPE_CONFIG[targetName];
-  if (!cfg) return;
-
+  const targetName = intersects[0].object.name.toLowerCase(); // e.g. 'faucet_2'
   console.log(`[Click] ${targetName}`);
 
-  const firstColdKey = cfg.coldPipes[cfg.coldPipes.length - 1];
-  const firstColdPipe = flowingPipes.get(firstColdKey);
-  if (!firstColdPipe) {
-    console.warn(`[Click] 找不到管路 ${firstColdKey}`);
-    return;
+  // ── 冷水管：pipe_faucet / pipe_faucet_2 / pipe_shower_2 ... ──
+  const pipe = flowingPipes.get(`pipe_${targetName}`);
+  console.log(`[Click] 管路:`, pipe ? '✅' : '❌ 找不到，請確認命名');
+
+  if (pipe) {
+    pipe.active = !pipe.active;
+    waterFlows[targetName]?.setActive(pipe.active);
+    pipe.mesh.material.opacity = pipe.active ? 0.75 : getInactivePipeOpacity();
+    if (!pipe.active) pipe.mesh.material.emissiveIntensity = 0;
+
+    // 計時器
+    if (activeTimers[targetName]) {
+      if (pipe.active) {
+        activeTimers[targetName].startTime = Date.now();
+        activeTimers[targetName].alerted = false;
+      } else {
+        activeTimers[targetName].startTime = null;
+      }
+    }
   }
 
-  const isNowActive = !firstColdPipe.active;
+  // ── 熱水管：pipe_faucet_w / pipe_faucet_2_w / pipe_shower_2_w ... ──
+  const hotPipeKey = `pipe_${targetName}_w`;
+  const hotPipe = flowingPipes.get(hotPipeKey);
+  const isNowActive = pipe?.active ?? false;
 
-  cfg.coldPipes.forEach(pipeName => {
-    const p = flowingPipes.get(pipeName);
-    if (!p) return;
-    if (isNowActive) {
-      p.active = true;
-      p.mesh.material.opacity = SHARED_COLD_PIPES.has(pipeName) ? 0.6 : 0.75;
-    } else {
-      const stillUsed = Object.entries(PIPE_CONFIG).some(([dName, dCfg]) => {
-        if (dName === targetName) return false;
-        if (!dCfg.coldPipes.includes(pipeName)) return false;
-        const endPipe = flowingPipes.get(dCfg.coldPipes[dCfg.coldPipes.length - 1]);
-        return endPipe?.active ?? false;
-      });
-      if (!stillUsed) {
-        p.active = false;
-        p.mesh.material.opacity = getInactivePipeOpacity();
-      }
+  if (hotPipe) {
+    hotPipe.active = isNowActive;
+    hotPipe.mesh.material.opacity = isNowActive ? 0.75 : getInactivePipeOpacity();
+    if (!isNowActive) hotPipe.mesh.material.emissiveIntensity = 0;
+  }
+
+  // ── 同步冷水幹管 pipe_restroom（只要有任何冷水管 active 就亮）──
+  let anyActive = false;
+  flowingPipes.forEach((p, key) => {
+    if (key !== 'pipe_restroom' && key !== 'pipe_restroom_w' && !key.endsWith('_w') && p.active) {
+      anyActive = true;
     }
   });
 
-  cfg.hotPipes.forEach(pipeName => {
-    const p = flowingPipes.get(pipeName);
-    if (!p) return;
-    if (isNowActive) {
-      p.active = true;
-      p.mesh.material.opacity = SHARED_HOT_PIPES.has(pipeName) ? 0.6 : 0.75;
-    } else {
-      const stillUsed = Object.entries(PIPE_CONFIG).some(([dName, dCfg]) => {
-        if (dName === targetName) return false;
-        if (!dCfg.hotPipes.includes(pipeName)) return false;
-        const endPipe = flowingPipes.get(dCfg.coldPipes[dCfg.coldPipes.length - 1]);
-        return endPipe?.active ?? false;
-      });
-      if (!stillUsed) {
-        p.active = false;
-        p.mesh.material.opacity = getInactivePipeOpacity();
-      }
+  const total = flowingPipes.get('pipe_restroom');
+  if (total) {
+    total.active = anyActive;
+    total.mesh.material.opacity = anyActive ? 0.6 : getInactivePipeOpacity();
+    if (!anyActive) total.mesh.material.emissiveIntensity = 0;
+  }
+
+  // ── 同步熱水幹管 pipe_restroom_w（只要有任何熱水管 active 就亮）──
+  let anyHotActive = false;
+  flowingPipes.forEach((p, key) => {
+    if (key.endsWith('_w') && key !== 'pipe_restroom_w' && p.active) {
+      anyHotActive = true;
     }
   });
 
-  waterFlows[targetName]?.setActive(isNowActive);
-  drainFlows[cfg.drainKey]?.setActive(isNowActive);
+  const totalHot = flowingPipes.get('pipe_restroom_w');
+  if (totalHot) {
+    totalHot.active = anyHotActive;
+    totalHot.mesh.material.opacity = anyHotActive ? 0.6 : getInactivePipeOpacity();
+    if (!anyHotActive) totalHot.mesh.material.emissiveIntensity = 0;
+  }
 
-  if (activeTimers[targetName]) {
-    if (isNowActive) {
-      activeTimers[targetName].startTime = Date.now();
-      activeTimers[targetName].alerted = false;
-    } else {
-      activeTimers[targetName].startTime = null;
-    }
+  // ── 在 pipe.active 切換後，同步對應的 drain 漩渦 ──
+  // 'faucet' → 'drain_faucet'，'shower_2' → 'drain_shower_2'
+  const drainKey = `drain_${targetName}`;
+
+  if (drainFlows[drainKey]) {
+    drainFlows[drainKey].setActive(pipe?.active ?? false);
   }
 });
 
@@ -1478,17 +1357,11 @@ function animate() {
   for (const key in drainFlows) drainFlows[key].update(delta);
 
   // 管路 emissive 波動
-  // 管路 emissive 波動
-  flowingPipes.forEach((p, name) => {
+  flowingPipes.forEach((p) => {
     if (!p.mesh.material) return;
-    if (p.active) {
-      // ← 改成 opacity 波動
-      p.mesh.material.opacity = 0.5 + Math.sin(time * 10) * 0.3;
-    } else if (isXRayMode) {
-      p.mesh.material.opacity = 0.35 + Math.sin(time * 1.5) * 0.1;
-    } else {
-      p.mesh.material.opacity = 0.12; // 你的新預設值
-    }
+    p.mesh.material.emissiveIntensity = p.active
+      ? 0.6 + Math.sin(time * 10) * 0.4
+      : 0;
   });
 
   // 內部計時 → 超過 60 秒跳警告
@@ -1593,19 +1466,19 @@ if (isMobile) {
 
   // ── 視角旋轉（拖曳）──
   renderer.domElement.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 1) return;
-    const t = e.touches[0];
-    touchStartX = t.clientX;
-    touchStartY = t.clientY;
-    lastTouchX = t.clientX;
-    lastTouchY = t.clientY;
-    isTouchMoving = false;
+  if (e.touches.length !== 1) return;
+  const t = e.touches[0];
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+  lastTouchX = t.clientX;
+  lastTouchY = t.clientY;
+  isTouchMoving = false;
 
-    // ── 長按計時 ──
-    holdTimer = setTimeout(() => {
-      if (!isTouchMoving) isHoldWalking = true; // 沒有在滑動才啟動前進
-    }, 300);
-  }, { passive: true });
+  // ── 長按計時 ──
+  holdTimer = setTimeout(() => {
+    if (!isTouchMoving) isHoldWalking = true; // 沒有在滑動才啟動前進
+  }, 300);
+}, { passive: true });
 
   renderer.domElement.addEventListener('touchmove', (e) => {
     if (e.touches.length !== 1) return;
@@ -1631,41 +1504,41 @@ if (isMobile) {
   }, { passive: true });
 
   renderer.domElement.addEventListener('touchend', (e) => {
-    // 長按停止
-    clearTimeout(holdTimer);
-    isHoldWalking = false;
-    renderer.domElement._prevAvgY = null;
+  // 長按停止
+  clearTimeout(holdTimer);
+  isHoldWalking = false;
+  renderer.domElement._prevAvgY = null;
 
-    if (isTouchMoving) return; // 滑動不算點擊
+  if (isTouchMoving) return; // 滑動不算點擊
 
-    const now = Date.now();
-    const diff = now - lastTapTime;
+  const now = Date.now();
+  const diff = now - lastTapTime;
 
-    if (diff < DOUBLE_TAP_MS && diff > 0) {
-      clearTimeout(tapTimer);
-      lastTapTime = 0;
-      mobileUnlock();
-      openMenu();
-    } else {
-      lastTapTime = now;
-      tapTimer = setTimeout(() => {
-        if (menuPanel.style.display === 'flex') {
-          closeMenu();
-          mobileLock();
-          return;
-        }
-        if (!isMobileLocked) {
-          mobileLock();
-          return;
-        }
-        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-        const intersects = raycaster.intersectObjects(interactiveDevices);
-        if (!intersects.length) return;
-        const clickEvent = new MouseEvent('click', { bubbles: false });
-        renderer.domElement.dispatchEvent(clickEvent);
-      }, DOUBLE_TAP_MS);
-    }
-  }, { passive: true });
+  if (diff < DOUBLE_TAP_MS && diff > 0) {
+    clearTimeout(tapTimer);
+    lastTapTime = 0;
+    mobileUnlock();
+    openMenu();
+  } else {
+    lastTapTime = now;
+    tapTimer = setTimeout(() => {
+      if (menuPanel.style.display === 'flex') {
+        closeMenu();
+        mobileLock();
+        return;
+      }
+      if (!isMobileLocked) {
+        mobileLock();
+        return;
+      }
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+      const intersects = raycaster.intersectObjects(interactiveDevices);
+      if (!intersects.length) return;
+      const clickEvent = new MouseEvent('click', { bubbles: false });
+      renderer.domElement.dispatchEvent(clickEvent);
+    }, DOUBLE_TAP_MS);
+  }
+}, { passive: true });
 
   // ── 移動（虛擬搖桿區域）──
   // 手指雙指觸控：兩指同時滑動 → 前後移動

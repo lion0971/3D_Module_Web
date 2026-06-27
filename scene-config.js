@@ -6,7 +6,7 @@ export const CONFIG = {
     MODELS: {
         PLANT: `${basePath}models/Plant_Turtle_LOD.glb`,
         BUILDING: `${basePath}models/20260530.glb`,
-        HDRI: `${basePath}hdri/studio.exr`
+        HDRI: `${basePath}hdri/studio-0623.hdr`
     },
     ROOM_DATA: {
         "in_door1": "會議室 101",

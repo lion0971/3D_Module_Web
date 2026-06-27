@@ -428,13 +428,16 @@ function createConeVolumetricLight(color) {
 }
 
 function setupPipeMaterial(mesh, baseColor = 0x00aaff, emissiveColor = 0x0055ff) {
-  mesh.material = new THREE.MeshBasicMaterial({
+  mesh.material = new THREE.MeshStandardMaterial({
     color: baseColor,
     transparent: true,
-    opacity: 0.12,
-    side: THREE.FrontSide,   // ← 改 FrontSide，消除背面自疊加
+    opacity: 0.03,//原0.05
+    emissive: new THREE.Color(emissiveColor),
+    emissiveIntensity: 0,
+    roughness: 0.1,
+    metalness: 0.1,
+    side: THREE.DoubleSide,
     depthWrite: false,
-    blending: THREE.NormalBlending,
   });
 }
 
@@ -557,13 +560,13 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
     if (!mesh.isMesh) return;
     const name = mesh.name.toLowerCase();
 
-    if (name.includes('pipe')) {
-      console.log(
-        `[pipe mesh] 原始名稱: "${mesh.name}"`,
-        `| isCold: ${allColdPipeNames.has(name)}`,
-        `| isHot: ${allHotPipeNames.has(name)}`
-      );
-    }
+     if (name.includes('pipe')) {
+    console.log(
+      `[pipe mesh] 原始名稱: "${mesh.name}"`,
+      `| isCold: ${allColdPipeNames.has(name)}`,
+      `| isHot: ${allHotPipeNames.has(name)}`
+    );
+  }
 
     if (name.includes('drain')) console.log(`[Debug] drain mesh 名稱: "${name}"`);
 
@@ -975,52 +978,52 @@ function toggleXRayMode(enable) {
   // }
 
   const processedMaterials = new Set();
-  scene.traverse((obj) => {
-    if (!obj.isMesh) return;
-    const name = obj.name.toLowerCase();
-    const isPipe = name.includes('measure') || name.includes('pipe');
-    const isDevice = interactiveDevices.includes(obj)
-      || Object.keys(PIPE_CONFIG).some(key => name.includes(key))
-      || name.includes('bulb');
-    if (isDevice) return;
+scene.traverse((obj) => {
+  if (!obj.isMesh) return;
+  const name = obj.name.toLowerCase();
+  const isPipe = name.includes('measure') || name.includes('pipe');
+  const isDevice = interactiveDevices.includes(obj)
+    || Object.keys(PIPE_CONFIG).some(key => name.includes(key))
+    || name.includes('bulb');
+  if (isDevice) return;
 
-    const mat = obj.material;
+  const mat = obj.material;
 
-    // ── pipe 不走 processedMaterials 過濾，每個 mesh 獨立處理 ──
-    // ── 管路：只調整「目前未啟動」的管路，啟動中的保持 0.75 不動 ──
-    if (isPipe) {
-      const pipeEntry = flowingPipes.get(name);
-      if (pipeEntry && !pipeEntry.active) {
-        if (enable) {
-          mat.opacity = 0.45;
-          mat.emissiveIntensity = 0.3 + Math.sin(performance.now() * 0.001) * 0.1; // 靜態給初始值即可
-        } else {
-          mat.opacity = 0.03;
-          mat.emissiveIntensity = 0;
-        }
-        mat.needsUpdate = true;
-      }
-      return;
-    }
-
-    // ── 非 pipe 物件才做去重處理 ──
-    if (processedMaterials.has(mat)) return;
-    processedMaterials.add(mat);
-
+  // ── pipe 不走 processedMaterials 過濾，每個 mesh 獨立處理 ──
+// ── 管路：只調整「目前未啟動」的管路，啟動中的保持 0.75 不動 ──
+if (isPipe) {
+  const pipeEntry = flowingPipes.get(name);
+  if (pipeEntry && !pipeEntry.active) {
     if (enable) {
-      mat.userData._origOpacity = mat.opacity;
-      mat.userData._origTransparent = mat.transparent;
-      mat.userData._origDepthWrite = mat.depthWrite;
-      mat.transparent = true;
-      mat.opacity = 0.15;
-      mat.depthWrite = false;
+      mat.opacity = 0.45;
+      mat.emissiveIntensity = 0.3 + Math.sin(performance.now() * 0.001) * 0.1; // 靜態給初始值即可
     } else {
-      mat.opacity = mat.userData._origOpacity ?? 1.0;
-      mat.transparent = mat.userData._origTransparent ?? false;
-      mat.depthWrite = mat.userData._origDepthWrite ?? true;
+      mat.opacity = 0.03;
+      mat.emissiveIntensity = 0;
     }
     mat.needsUpdate = true;
-  });
+  }
+  return;
+}
+
+  // ── 非 pipe 物件才做去重處理 ──
+  if (processedMaterials.has(mat)) return;
+  processedMaterials.add(mat);
+
+  if (enable) {
+    mat.userData._origOpacity = mat.opacity;
+    mat.userData._origTransparent = mat.transparent;
+    mat.userData._origDepthWrite = mat.depthWrite;
+    mat.transparent = true;
+    mat.opacity = 0.15;
+    mat.depthWrite = false;
+  } else {
+    mat.opacity = mat.userData._origOpacity ?? 1.0;
+    mat.transparent = mat.userData._origTransparent ?? false;
+    mat.depthWrite = mat.userData._origDepthWrite ?? true;
+  }
+  mat.needsUpdate = true;
+});
 }
 
 // ── 右鍵開選單 ──
@@ -1114,6 +1117,7 @@ warningOffBtn.onclick = () => {
     if (!stillUsed) {
       p.active = false;
       p.mesh.material.opacity = getInactivePipeOpacity();
+      p.mesh.material.emissiveIntensity = 0;
     }
   });
 
@@ -1129,6 +1133,7 @@ warningOffBtn.onclick = () => {
     if (!stillUsed) {
       p.active = false;
       p.mesh.material.opacity = getInactivePipeOpacity();
+      p.mesh.material.emissiveIntensity = 0;
     }
   });
 
@@ -1358,7 +1363,6 @@ controls.addEventListener('unlock', () => {
   if (warningModal.style.display !== 'block') {
     sliderWrap.style.opacity = '1';
     sliderWrap.style.pointerEvents = 'auto';
-    menuPanel.style.display = 'flex'
   }
 });
 
@@ -1412,6 +1416,7 @@ renderer.domElement.addEventListener('click', () => {
       if (!stillUsed) {
         p.active = false;
         p.mesh.material.opacity = getInactivePipeOpacity();
+        p.mesh.material.emissiveIntensity = 0;
       }
     }
   });
@@ -1432,6 +1437,7 @@ renderer.domElement.addEventListener('click', () => {
       if (!stillUsed) {
         p.active = false;
         p.mesh.material.opacity = getInactivePipeOpacity();
+        p.mesh.material.emissiveIntensity = 0;
       }
     }
   });
@@ -1479,15 +1485,16 @@ function animate() {
 
   // 管路 emissive 波動
   // 管路 emissive 波動
-  flowingPipes.forEach((p, name) => {
+  flowingPipes.forEach((p, name) => {          // ← 補上第二個參數 name
     if (!p.mesh.material) return;
     if (p.active) {
-      // ← 改成 opacity 波動
-      p.mesh.material.opacity = 0.5 + Math.sin(time * 10) * 0.3;
+      // 啟動中：原本的快速波動
+      p.mesh.material.emissiveIntensity = 0.6 + Math.sin(time * 10) * 0.4;
     } else if (isXRayMode) {
-      p.mesh.material.opacity = 0.35 + Math.sin(time * 1.5) * 0.1;
+      // X-Ray 模式 + 未啟動：緩慢呼吸感
+      p.mesh.material.emissiveIntensity = 0.2 + Math.sin(time * 1.5) * 0.15;
     } else {
-      p.mesh.material.opacity = 0.12; // 你的新預設值
+      p.mesh.material.emissiveIntensity = 0;
     }
   });
 

@@ -21,8 +21,6 @@ const direction = new THREE.Vector3();
 const collidableObjects = [];
 const raycaster = new THREE.Raycaster();
 const interactiveDevices = [];
-window.interactiveDevices = interactiveDevices;//console測試
-
 const flowingPipes = new Map();
 const outletObjects = {};   // faucet_outlet / faucet_2_outlet / shower_outlet / shower_2_outlet ...
 const waterFlows = {};      // WaterFlow 實例，key 為完整裝置名稱
@@ -66,7 +64,7 @@ const PIPE_CONFIG = {
   'restroom_toilet': {
     outletKey: 'restroom_toilet_outlet',
     drainKey: 'restroom_toilet_drain',
-    drainRadius: 0.10,
+    drainRadius: 0.18,
     coldPipes: ['pipe_main', 'pipe_restroom', 'pipe_restroom_st', 'pipe_restroom_toilet'],
     hotPipes: ['pipe_restroom_toilet_w'],
     type: 'faucet',
@@ -343,9 +341,6 @@ class DrainFlow {
 // 三、場景、渲染器、後處理
 // ─────────────────────────────────────────
 const scene = new THREE.Scene();
-
-window.scene = scene;//console測試
-
 const camera = new THREE.PerspectiveCamera(
   CONFIG.CAMERA.fov,
   window.innerWidth / window.innerHeight,
@@ -428,13 +423,16 @@ function createConeVolumetricLight(color) {
 }
 
 function setupPipeMaterial(mesh, baseColor = 0x00aaff, emissiveColor = 0x0055ff) {
-  mesh.material = new THREE.MeshBasicMaterial({
+  mesh.material = new THREE.MeshStandardMaterial({
     color: baseColor,
     transparent: true,
-    opacity: 0.12,
-    side: THREE.FrontSide,   // ← 改 FrontSide，消除背面自疊加
+    opacity: 0.03,//原0.05
+    emissive: new THREE.Color(emissiveColor),
+    emissiveIntensity: 0,
+    roughness: 0.1,
+    metalness: 0.1,
+    side: THREE.DoubleSide,
     depthWrite: false,
-    blending: THREE.NormalBlending,
   });
 }
 
@@ -556,14 +554,6 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
   gltf.scene.traverse((mesh) => {
     if (!mesh.isMesh) return;
     const name = mesh.name.toLowerCase();
-
-    if (name.includes('pipe')) {
-      console.log(
-        `[pipe mesh] 原始名稱: "${mesh.name}"`,
-        `| isCold: ${allColdPipeNames.has(name)}`,
-        `| isHot: ${allHotPipeNames.has(name)}`
-      );
-    }
 
     if (name.includes('drain')) console.log(`[Debug] drain mesh 名稱: "${name}"`);
 
@@ -906,15 +896,6 @@ function closeMenu() {
 
 // ── 補回這個函式 ──
 function toggleXRayMode(enable) {
-  // ── 開啟管路透視模式下關閉太陽 ──
-  if (enable) {
-    sunLight.userData._xray_intensity = sunLight.intensity;
-    sunLight.intensity = 0;
-    sunMesh.visible = false;
-  } else {
-    sunLight.intensity = sunLight.userData._xray_intensity ?? sunLight.intensity;
-    sunMesh.visible = true;
-  };
 
   // ── 管路透視模式下背景切換 ──
   if (enable) {
@@ -932,80 +913,37 @@ function toggleXRayMode(enable) {
   //   scene.environment = scene.userData._origEnvironment ?? null;
   // }
 
-  // ── 燈泡：直接 traverse 確保不漏掉 ──
-  scene.traverse((obj) => {
-    const n = obj.name.toLowerCase();
-    if (!n.includes('bulb')) return;
 
-    // 關閉 emissive
-    if (obj.isMesh && obj.material) {
-      if (enable) {
-        obj.material.userData._xray_emissive = obj.material.emissiveIntensity;
-        obj.material.emissiveIntensity = 0;
-      } else {
-        obj.material.emissiveIntensity =
-          obj.material.userData._xray_emissive ?? obj.material.emissiveIntensity;
-      }
-      obj.material.needsUpdate = true;
-    }
-
-    // 關閉所有燈光子物件（PointLight / SpotLight / RectAreaLight）
-    obj.children.forEach(c => {
-      if (c.isLight) {
-        if (enable) {
-          c.userData._xray_intensity = c.intensity;
-          c.intensity = 0;
-        } else {
-          c.intensity = c.userData._xray_intensity ?? c.intensity;
-        }
-      }
-      // 關閉光暈 mesh
-      if (c.isMesh && (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow)) {
-        c.visible = !enable;
-      }
-    });
-  });
   // ── 管路透視模式下燈泡關閉 / 恢復 ──
-  // if (enable) {
-  //   // 強制設為 0，不改 targetBulbStrength 的「正確值」
-  //   applyBulbStrength(0);
-  // } else {
-  //   // 恢復至目前應有的亮度
-  //   applyBulbStrength(currentBulbStrength);
-  // }
+  if (enable) {
+    // 強制設為 0，不改 targetBulbStrength 的「正確值」
+    applyBulbStrength(0);
+  } else {
+    // 恢復至目前應有的亮度
+    applyBulbStrength(currentBulbStrength);
+  }
 
   const processedMaterials = new Set();
   scene.traverse((obj) => {
     if (!obj.isMesh) return;
     const name = obj.name.toLowerCase();
     const isPipe = name.includes('measure') || name.includes('pipe');
-    const isDevice = interactiveDevices.includes(obj)
-      || Object.keys(PIPE_CONFIG).some(key => name.includes(key))
-      || name.includes('bulb');
+    const isDevice = interactiveDevices.includes(obj) || name.includes('bulb');
     if (isDevice) return;
 
     const mat = obj.material;
+    if (processedMaterials.has(mat)) return;
+    processedMaterials.add(mat);
 
-    // ── pipe 不走 processedMaterials 過濾，每個 mesh 獨立處理 ──
     // ── 管路：只調整「目前未啟動」的管路，啟動中的保持 0.75 不動 ──
     if (isPipe) {
       const pipeEntry = flowingPipes.get(name);
       if (pipeEntry && !pipeEntry.active) {
-        if (enable) {
-          mat.opacity = 0.45;
-          mat.emissiveIntensity = 0.3 + Math.sin(performance.now() * 0.001) * 0.1; // 靜態給初始值即可
-        } else {
-          mat.opacity = 0.03;
-          mat.emissiveIntensity = 0;
-        }
+        mat.opacity = enable ? 0.45 : 0.03;//原0.05
         mat.needsUpdate = true;
       }
       return;
     }
-
-    // ── 非 pipe 物件才做去重處理 ──
-    if (processedMaterials.has(mat)) return;
-    processedMaterials.add(mat);
 
     if (enable) {
       mat.userData._origOpacity = mat.opacity;
@@ -1114,6 +1052,7 @@ warningOffBtn.onclick = () => {
     if (!stillUsed) {
       p.active = false;
       p.mesh.material.opacity = getInactivePipeOpacity();
+      p.mesh.material.emissiveIntensity = 0;
     }
   });
 
@@ -1129,6 +1068,7 @@ warningOffBtn.onclick = () => {
     if (!stillUsed) {
       p.active = false;
       p.mesh.material.opacity = getInactivePipeOpacity();
+      p.mesh.material.emissiveIntensity = 0;
     }
   });
 
@@ -1358,7 +1298,6 @@ controls.addEventListener('unlock', () => {
   if (warningModal.style.display !== 'block') {
     sliderWrap.style.opacity = '1';
     sliderWrap.style.pointerEvents = 'auto';
-    menuPanel.style.display = 'flex'
   }
 });
 
@@ -1412,6 +1351,7 @@ renderer.domElement.addEventListener('click', () => {
       if (!stillUsed) {
         p.active = false;
         p.mesh.material.opacity = getInactivePipeOpacity();
+        p.mesh.material.emissiveIntensity = 0;
       }
     }
   });
@@ -1432,6 +1372,7 @@ renderer.domElement.addEventListener('click', () => {
       if (!stillUsed) {
         p.active = false;
         p.mesh.material.opacity = getInactivePipeOpacity();
+        p.mesh.material.emissiveIntensity = 0;
       }
     }
   });
@@ -1478,17 +1419,11 @@ function animate() {
   for (const key in drainFlows) drainFlows[key].update(delta);
 
   // 管路 emissive 波動
-  // 管路 emissive 波動
-  flowingPipes.forEach((p, name) => {
+  flowingPipes.forEach((p) => {
     if (!p.mesh.material) return;
-    if (p.active) {
-      // ← 改成 opacity 波動
-      p.mesh.material.opacity = 0.5 + Math.sin(time * 10) * 0.3;
-    } else if (isXRayMode) {
-      p.mesh.material.opacity = 0.35 + Math.sin(time * 1.5) * 0.1;
-    } else {
-      p.mesh.material.opacity = 0.12; // 你的新預設值
-    }
+    p.mesh.material.emissiveIntensity = p.active
+      ? 0.6 + Math.sin(time * 10) * 0.4
+      : 0;
   });
 
   // 內部計時 → 超過 60 秒跳警告
