@@ -27,13 +27,11 @@ const flowingPipes = new Map();
 const outletObjects = {};   // faucet_outlet / faucet_2_outlet / shower_outlet / shower_2_outlet ...
 const waterFlows = {};      // WaterFlow 實例，key 為完整裝置名稱
 let isXRayMode = false;
-let unlockFromButton = false;
 
 //碰撞宣告head
 let collidableObjects = [];
 let isNoclipMode = false;
 let isStuckInWall = false;
-let isMenuAction = false;
 
 const rayDirections = [
   new THREE.Vector3(0, 0, -1),
@@ -914,7 +912,6 @@ Object.assign(xrayBtn.style, {
 });
 xrayBtn.onclick = (e) => {
   e.stopPropagation();
-  unlockFromButton = true;
   isXRayMode = !isXRayMode;
   xrayBtn.innerText = isXRayMode ? '關閉管路透視模式' : '開啟管路透視模式';
   xrayBtn.style.background = isXRayMode
@@ -922,26 +919,20 @@ xrayBtn.onclick = (e) => {
     : 'rgba(0,255,255,0.2)';
   toggleXRayMode(isXRayMode);
   menuPanel.style.display = 'none';
-  setTimeout(() => {
-    unlockFromButton = false;
-    controls.lock();
-  }, 80);
+  // ← 改成直接對 domElement 請求 Pointer Lock
+  renderer.domElement.requestPointerLock();
 };
 menuPanel.appendChild(xrayBtn);
 
 // ── 面板開關函式 ──
 function openMenu() {
-  if (controls.isLocked) controls.unlock();
+  if (controls.isLocked) controls.unlock();  // 只在鎖定時才解鎖
   menuPanel.style.display = 'flex';
 }
 
 function closeMenu() {
-  unlockFromButton = true;
   menuPanel.style.display = 'none';
-  setTimeout(() => {
-    unlockFromButton = false;
-    controls.lock();
-  }, 80);
+  setTimeout(() => controls.lock(), 80);
 }
 
 // ── 補回這個函式 ──
@@ -983,32 +974,31 @@ function toggleXRayMode(enable) {
   // }
 
   // ── 燈泡：用 bulbMeshes 快取 ──
-// ── 燈泡：用 bulbMeshes 快取 ──
-bulbMeshes.forEach(({ mesh }) => {
-  if (mesh.material) {
-    if (enable) {
-      mesh.material.userData._xray_emissive = mesh.material.emissiveIntensity;
-      mesh.material.emissiveIntensity = 0;
-    }
-    mesh.material.needsUpdate = true;
-  }
-  mesh.children.forEach(c => {
-    if (c.isLight) {
+  bulbMeshes.forEach(({ mesh }) => {
+    if (mesh.material) {
       if (enable) {
-        c.userData._xray_intensity = c.intensity;
-        c.intensity = 0;
+        mesh.material.userData._xray_emissive = mesh.material.emissiveIntensity;
+        mesh.material.emissiveIntensity = 0;
       } else {
-        c.intensity = c.userData._xray_intensity ?? c.intensity;
+        mesh.material.emissiveIntensity =
+          mesh.material.userData._xray_emissive ?? mesh.material.emissiveIntensity;
       }
+      mesh.material.needsUpdate = true;
     }
-    if (c.isMesh && (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow)) {
-      c.visible = !enable;
-    }
+    mesh.children.forEach(c => {
+      if (c.isLight) {
+        if (enable) {
+          c.userData._xray_intensity = c.intensity;
+          c.intensity = 0;
+        } else {
+          c.intensity = c.userData._xray_intensity ?? c.intensity;
+        }
+      }
+      if (c.isMesh && (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow)) {
+        c.visible = !enable;
+      }
+    });
   });
-});
-if (!enable) {
-  applyBulbStrength(currentBulbStrength);
-}
 
   // ── 一般物件：用 cachedSceneMeshes 快取 ──
   const processedMaterials = new Set();
@@ -1224,8 +1214,6 @@ manager.onLoad = () => {
   _origOnLoad?.();
   collectBulbs();
   applyDayNight(parseFloat(daySlider.value));
-  currentBulbStrength = targetBulbStrength;
-  applyBulbStrength(currentBulbStrength);
 };
 
 // ── 滑桿容器（預設隱藏）──
@@ -1374,12 +1362,11 @@ controls.addEventListener('lock', () => {
 });
 
 controls.addEventListener('unlock', () => {
+  // 警告彈窗開著時不顯示（避免重疊）
   if (warningModal.style.display !== 'block') {
     sliderWrap.style.opacity = '1';
     sliderWrap.style.pointerEvents = 'auto';
-    if (!unlockFromButton) {
-      menuPanel.style.display = 'flex';
-    }
+    menuPanel.style.display = 'flex'
   }
 });
 
@@ -1518,7 +1505,7 @@ function animate() {
       ? 2 * anim.progress * anim.progress
       : 1 - Math.pow(-2 * anim.progress + 2, 2) / 2;
 
-    anim.mesh.rotation.y = -eased * Math.PI / 2;
+    anim.mesh.rotation.y = eased * Math.PI / 2;
 
     if (anim.progress === 0 || anim.progress === 1) {
       anim.direction = 0; // 動畫結束
@@ -1568,9 +1555,9 @@ function animate() {
     }
 
     const moveVelocity = new THREE.Vector3(
-      velocity.x * delta,
+      -velocity.x * delta,
       0,
-      velocity.z * delta
+      -velocity.z * delta
     );
     moveVelocity.applyQuaternion(camera.quaternion);
     moveVelocity.y = 0;

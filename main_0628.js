@@ -18,31 +18,14 @@ let moveForward = false, moveBackward = false, moveLeft = false, moveRight = fal
 let prevTime = performance.now();
 const velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
+const collidableObjects = [];
 const raycaster = new THREE.Raycaster();
 const interactiveDevices = [];
-const doorObjects = [];
-const doorAnimations = {};
 const cachedSceneMeshes = [];
 const flowingPipes = new Map();
 const outletObjects = {};   // faucet_outlet / faucet_2_outlet / shower_outlet / shower_2_outlet ...
 const waterFlows = {};      // WaterFlow 實例，key 為完整裝置名稱
 let isXRayMode = false;
-let unlockFromButton = false;
-
-//碰撞宣告head
-let collidableObjects = [];
-let isNoclipMode = false;
-let isStuckInWall = false;
-let isMenuAction = false;
-
-const rayDirections = [
-  new THREE.Vector3(0, 0, -1),
-  new THREE.Vector3(0, 0, 1),
-  new THREE.Vector3(-1, 0, 0),
-  new THREE.Vector3(1, 0, 0)
-];
-const collisionDistance = 0.5;
-//碰撞宣告end
 
 /** 依目前模式回傳管路「非啟動」狀態的透明度 */
 function getInactivePipeOpacity() {
@@ -441,53 +424,6 @@ function createConeVolumetricLight(color) {
   return mesh;
 }
 
-//碰撞head
-function checkCurrentCollision() {
-  if (collidableObjects.length === 0) return false;
-  for (const dir of rayDirections) {
-    const worldDir = dir.clone().applyQuaternion(camera.quaternion).normalize();
-    raycaster.set(camera.position, worldDir);
-    const intersects = raycaster.intersectObjects(collidableObjects);
-    if (intersects.length > 0 && intersects[0].distance < 0.2) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function handleMovementAndCollision(moveVelocity) {
-  if (isNoclipMode) {
-    camera.position.add(moveVelocity);
-    return;
-  }
-
-  if (isStuckInWall) {
-    const stillColliding = checkCurrentCollision();
-    if (!stillColliding) {
-      isStuckInWall = false;
-    }
-    camera.position.add(moveVelocity);
-    return;
-  }
-
-  if (collidableObjects.length > 0 && (moveVelocity.x !== 0 || moveVelocity.z !== 0)) {
-    const moveDir = moveVelocity.clone().normalize();
-    raycaster.set(camera.position, moveDir);
-    const intersects = raycaster.intersectObjects(collidableObjects);
-    if (intersects.length > 0 && intersects[0].distance < collisionDistance) {
-      const hitNormal = intersects[0].face.normal.clone();
-      hitNormal.applyQuaternion(intersects[0].object.quaternion);
-      hitNormal.y = 0;
-      hitNormal.normalize();
-      const dotProduct = moveVelocity.dot(hitNormal);
-      moveVelocity.sub(hitNormal.multiplyScalar(dotProduct));
-    }
-  }
-
-  camera.position.add(moveVelocity);
-};
-//碰撞end
-
 function setupPipeMaterial(mesh, baseColor = 0x00aaff, emissiveColor = 0x0055ff) {
   mesh.material = new THREE.MeshBasicMaterial({
     color: baseColor,
@@ -810,17 +746,6 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
       collidableObjects.push(mesh);
     }
 
-    // traverse 裡收集門
-    if (name.includes('door_')) {
-      doorObjects.push(mesh);
-      doorAnimations[name] = {
-        mesh,
-        isOpen: false,
-        progress: 0,      // 0=全關, 1=全開
-        direction: 0,     // 1=開門中, -1=關門中, 0=靜止
-      };
-    }
-
     // ✅ drain 識別
     if (Object.values(PIPE_CONFIG).some(cfg => cfg.drainKey === name)) {
       const worldPos = new THREE.Vector3();
@@ -913,49 +838,30 @@ Object.assign(xrayBtn.style, {
   width: '100%',
 });
 xrayBtn.onclick = (e) => {
-  e.stopPropagation();
-  unlockFromButton = true;
+  e.stopPropagation();   // 阻止事件冒泡
   isXRayMode = !isXRayMode;
   xrayBtn.innerText = isXRayMode ? '關閉管路透視模式' : '開啟管路透視模式';
   xrayBtn.style.background = isXRayMode
     ? 'rgba(0,255,255,0.5)'
     : 'rgba(0,255,255,0.2)';
   toggleXRayMode(isXRayMode);
-  menuPanel.style.display = 'none';
-  setTimeout(() => {
-    unlockFromButton = false;
-    controls.lock();
-  }, 80);
+  closeMenu();
 };
 menuPanel.appendChild(xrayBtn);
 
 // ── 面板開關函式 ──
 function openMenu() {
-  if (controls.isLocked) controls.unlock();
+  if (controls.isLocked) controls.unlock();  // 只在鎖定時才解鎖
   menuPanel.style.display = 'flex';
 }
 
 function closeMenu() {
-  unlockFromButton = true;
   menuPanel.style.display = 'none';
-  setTimeout(() => {
-    unlockFromButton = false;
-    controls.lock();
-  }, 80);
+  setTimeout(() => controls.lock(), 80);
 }
 
 // ── 補回這個函式 ──
 function toggleXRayMode(enable) {
-
-  //碰撞head
-  isNoclipMode = enable;
-
-  if (!enable) {
-    // 關閉透視模式時檢查是否卡牆
-    isStuckInWall = checkCurrentCollision();
-  }
-  //碰撞end
-
   // ── 開啟管路透視模式下關閉太陽 ──
   if (enable) {
     sunLight.userData._xray_intensity = sunLight.intensity;
@@ -983,32 +889,31 @@ function toggleXRayMode(enable) {
   // }
 
   // ── 燈泡：用 bulbMeshes 快取 ──
-// ── 燈泡：用 bulbMeshes 快取 ──
-bulbMeshes.forEach(({ mesh }) => {
-  if (mesh.material) {
-    if (enable) {
-      mesh.material.userData._xray_emissive = mesh.material.emissiveIntensity;
-      mesh.material.emissiveIntensity = 0;
-    }
-    mesh.material.needsUpdate = true;
-  }
-  mesh.children.forEach(c => {
-    if (c.isLight) {
+  bulbMeshes.forEach(({ mesh }) => {
+    if (mesh.material) {
       if (enable) {
-        c.userData._xray_intensity = c.intensity;
-        c.intensity = 0;
+        mesh.material.userData._xray_emissive = mesh.material.emissiveIntensity;
+        mesh.material.emissiveIntensity = 0;
       } else {
-        c.intensity = c.userData._xray_intensity ?? c.intensity;
+        mesh.material.emissiveIntensity =
+          mesh.material.userData._xray_emissive ?? mesh.material.emissiveIntensity;
       }
+      mesh.material.needsUpdate = true;
     }
-    if (c.isMesh && (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow)) {
-      c.visible = !enable;
-    }
+    mesh.children.forEach(c => {
+      if (c.isLight) {
+        if (enable) {
+          c.userData._xray_intensity = c.intensity;
+          c.intensity = 0;
+        } else {
+          c.intensity = c.userData._xray_intensity ?? c.intensity;
+        }
+      }
+      if (c.isMesh && (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow)) {
+        c.visible = !enable;
+      }
+    });
   });
-});
-if (!enable) {
-  applyBulbStrength(currentBulbStrength);
-}
 
   // ── 一般物件：用 cachedSceneMeshes 快取 ──
   const processedMaterials = new Set();
@@ -1224,8 +1129,6 @@ manager.onLoad = () => {
   _origOnLoad?.();
   collectBulbs();
   applyDayNight(parseFloat(daySlider.value));
-  currentBulbStrength = targetBulbStrength;
-  applyBulbStrength(currentBulbStrength);
 };
 
 // ── 滑桿容器（預設隱藏）──
@@ -1364,7 +1267,6 @@ daySlider.addEventListener('click', e => e.stopPropagation());
 // ─────────────────────────────────────────
 // 八、控制與互動
 // ─────────────────────────────────────────
-//十字鎖住控制
 const controls = new PointerLockControls(camera, renderer.domElement);
 
 // ── 鎖定/解鎖時切換滑桿顯示 ──
@@ -1374,12 +1276,11 @@ controls.addEventListener('lock', () => {
 });
 
 controls.addEventListener('unlock', () => {
+  // 警告彈窗開著時不顯示（避免重疊）
   if (warningModal.style.display !== 'block') {
     sliderWrap.style.opacity = '1';
     sliderWrap.style.pointerEvents = 'auto';
-    if (!unlockFromButton) {
-      menuPanel.style.display = 'flex';
-    }
+    menuPanel.style.display = 'flex'
   }
 });
 
@@ -1399,20 +1300,6 @@ renderer.domElement.addEventListener('click', () => {
 
   // 已鎖定 → raycaster 互動
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-
-  // 門 click 事件
-  const doorIntersects = raycaster.intersectObjects(doorObjects);
-  if (doorIntersects.length) {
-    const doorName = doorIntersects[0].object.name.toLowerCase();
-    const anim = doorAnimations[doorName];
-    if (anim) {
-      anim.direction = anim.isOpen ? -1 : 1;
-      anim.isOpen = !anim.isOpen;
-    }
-    return; // 點到門就不繼續判斷水管
-  }
-
-
   const intersects = raycaster.intersectObjects(interactiveDevices);
   if (!intersects.length) return;
 
@@ -1505,26 +1392,6 @@ function animate() {
   const time = performance.now() / 1000;
   const delta = Math.min(time - prevTime, 0.1);
 
-  // 門開關動畫
-  for (const key in doorAnimations) {
-    const anim = doorAnimations[key];
-    if (anim.direction === 0) continue;
-
-    anim.progress += anim.direction * delta * 1.5; // 速度
-    anim.progress = Math.max(0, Math.min(1, anim.progress));
-
-    // easing 讓動畫更自然
-    const eased = anim.progress < 0.5
-      ? 2 * anim.progress * anim.progress
-      : 1 - Math.pow(-2 * anim.progress + 2, 2) / 2;
-
-    anim.mesh.rotation.y = -eased * Math.PI / 2;
-
-    if (anim.progress === 0 || anim.progress === 1) {
-      anim.direction = 0; // 動畫結束
-    }
-  }
-
   // 水流粒子
   for (const key in waterFlows) waterFlows[key].update(delta);
   // 排水漩渦粒子更新
@@ -1538,6 +1405,8 @@ function animate() {
       p.mesh.material.opacity = 0.5 + Math.sin(time * 10) * 0.3;
     } else if (isXRayMode) {
       p.mesh.material.opacity = 0.35 + Math.sin(time * 1.5) * 0.1;
+    } else {
+      p.mesh.material.opacity = 0.12;
     }
   });
 
@@ -1553,6 +1422,7 @@ function animate() {
   }
 
   // 移動
+  // 移動
   if (controls.isLocked) {
     velocity.x -= velocity.x * 10.0 * delta;
     velocity.z -= velocity.z * 10.0 * delta;
@@ -1564,17 +1434,11 @@ function animate() {
 
     // ── 手機長按前進 ──
     if (isHoldWalking && !isTouchMoving) {
-      velocity.z -= 3.0; // ← 改成影響 velocity 而不是直接移動
+      controls.moveForward(3.0 * delta);
     }
 
-    const moveVelocity = new THREE.Vector3(
-      velocity.x * delta,
-      0,
-      velocity.z * delta
-    );
-    moveVelocity.applyQuaternion(camera.quaternion);
-    moveVelocity.y = 0;
-    handleMovementAndCollision(moveVelocity);
+    controls.moveForward(-velocity.z * delta);
+    controls.moveRight(-velocity.x * delta);
   }
 
   // ── 燈泡平滑 lerp ──
