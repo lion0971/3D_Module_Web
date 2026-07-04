@@ -1,6 +1,6 @@
 // scene-config.js
-const isGitHub = window.location.hostname.includes('github.io');
-const basePath = isGitHub ? './3D_Module_Web/' : './';
+// 不用去管是不是 GitHub，兩邊都用標準相對路徑
+const basePath = './';
 
 export const CONFIG = {
     MODELS: {
