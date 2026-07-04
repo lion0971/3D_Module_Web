@@ -441,35 +441,6 @@ function createConeVolumetricLight(color) {
   return mesh;
 }
 
-// ── 徑向漸層光暈貼圖（快取，只建立一次） ──
-let _radialGlowTexture = null;
-function getRadialGlowTexture() {
-  if (_radialGlowTexture) return _radialGlowTexture;
-
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-
-  const gradient = ctx.createRadialGradient(
-    size / 2, size / 2, 0,
-    size / 2, size / 2, size / 2
-  );
-  // 中心最亮最白，往外逐漸轉暖橙、再淡化到全透明，曲線連續無斷層
-  gradient.addColorStop(0.0, 'rgba(255,255,255,1)');
-  gradient.addColorStop(0.12, 'rgba(255,235,200,0.95)');
-  gradient.addColorStop(0.35, 'rgba(255,204,136,0.45)');
-  gradient.addColorStop(0.65, 'rgba(255,204,136,0.12)');
-  gradient.addColorStop(1.0, 'rgba(255,204,136,0)');
-
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
-
-  _radialGlowTexture = new THREE.CanvasTexture(canvas);
-  return _radialGlowTexture;
-}
-
 //碰撞head
 function checkCurrentCollision() {
   if (collidableObjects.length === 0) return false;
@@ -739,43 +710,67 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
         const localCenterGeo = new THREE.Vector3();
         localBox.getCenter(localCenterGeo);
 
-const baseRadius = Math.max(localSize.x, localSize.y, localSize.z) * 0.5;
+        const baseRadius = Math.max(localSize.x, localSize.y, localSize.z) * 0.5;
 
         const pt = new THREE.PointLight(0xffcc88, 4.0, 8.0, 2);
         pt.position.copy(localCenterGeo);
         mesh.add(pt);
 
-        // 💡 改用單張徑向漸層 Sprite 取代 7 層離散球殼
-        // 優點：漸層連續無斷層、永遠面向鏡頭、效能更省
-        const glowTexture = getRadialGlowTexture();
-        const glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-          map: glowTexture,
-          color: 0xffcc88,
-          transparent: true,
-          opacity: 0.85,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        }));
+        // 💡 精密微調的發光層次：前段密集重疊以疊出亮度，後段跨度加大並讓不透明度劇烈衰減，完美模擬霧狀淡出
+        const glowLayers = [
+          { radius: baseRadius * 1.05, opacity: 0.45 }, // 最內層貼緊本體
+          { radius: baseRadius * 1.15, opacity: 0.35 }, // 密集疊加層
+          { radius: baseRadius * 1.35, opacity: 0.25 }, // 密集疊加層
+          { radius: baseRadius * 1.70, opacity: 0.16 }, // 中間漸變
+          { radius: baseRadius * 2.30, opacity: 0.09 }, // 擴散開始
+          { radius: baseRadius * 3.20, opacity: 0.04 }, // 邊緣淡出
+          { radius: baseRadius * 4.50, opacity: 0.015 } // 終點柔和消融（加寬半徑，降低不透明度）
+        ];
 
-        // 光暈整體大小，數字越大範圍越廣，可依實際場景微調
-        const glowScale = baseRadius * 9;
-        glowSprite.scale.set(glowScale, glowScale, 1);
-        glowSprite.position.copy(localCenterGeo);
-        glowSprite.userData.isBallBulbGlow = true;
-        glowSprite.material.userData._baseOpacity = 0.85;
-        mesh.add(glowSprite);
+        glowLayers.forEach(({ radius, opacity }) => {
+          // 💡 調整一：段數從 16 提升到 32，消除多邊形硬邊
+          const geo = new THREE.SphereGeometry(radius, 32, 32);
+
+          const mat = new THREE.MeshBasicMaterial({
+            color: 0xffcc88,
+            transparent: true,
+            opacity,
+            side: THREE.BackSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+
+            // 🔥 調整二：開啟 Dithering（抖動防斷層），這是消除黑色背景下洋蔥圈痕跡的核心關鍵
+            dithering: true
+          });
+
+          const m = new THREE.Mesh(geo, mat);
+          m.userData.isBallBulbGlow = true;
+          m.material.userData._baseOpacity = opacity;
+          m.position.copy(localCenterGeo);
+          mesh.add(m);
+        });
 
       } else if (isRecBulb) {
-        // rec_bulb：只保留材質自發光，不再產生錐體光柱與聚光燈
-        if (mesh.material) {
-          mesh.material.emissive = new THREE.Color(0xffaa44);
-          mesh.material.emissiveIntensity = 10;
-          if (mesh.material.map) mesh.material.color.setHex(0x444444);
-        }
-      }
-      else {
-        // 一般燈泡（不含 line_bulb / ball_bulb / rec_bulb）：
-        // 圓錐體光柱 + 聚光燈效果移到這裡
+        mesh.geometry.computeBoundingBox();
+        const localBox = mesh.geometry.boundingBox;
+        const localSize = new THREE.Vector3();
+        localBox.getSize(localSize);
+        const localCenterGeo = new THREE.Vector3();
+        localBox.getCenter(localCenterGeo);
+
+        // 取得 mesh 的世界方向
+        const worldDir = new THREE.Vector3();
+        mesh.getWorldDirection(worldDir);
+
+        // 取得世界座標位置
+        const worldPos = new THREE.Vector3();
+        mesh.getWorldPosition(worldPos);
+
+        // 取得世界旋轉
+        const worldEuler = new THREE.Euler();
+        worldEuler.setFromQuaternion(mesh.getWorldQuaternion(new THREE.Quaternion()));
+
+        // ── 原本的點燈泡邏輯（維持不變）──
         if (mesh.material) {
           mesh.material.emissive = new THREE.Color(0xffaa44);
           mesh.material.emissiveIntensity = 10;
@@ -961,21 +956,6 @@ function toggleXRayMode(enable) {
   }
   //碰撞end
 
-  // ── 管路透視模式：鎖定亮度在預設值，並隱藏日夜滑桿 ──
-  if (enable) {
-    daySliderValueBeforeXRay = daySlider.value;
-    daySlider.value = String(DEFAULT_DAY_VALUE);
-    applyDayNight(DEFAULT_DAY_VALUE);
-    sliderWrap.style.opacity = '0';
-    sliderWrap.style.pointerEvents = 'none';
-  } else {
-    if (daySliderValueBeforeXRay !== null) {
-      daySlider.value = daySliderValueBeforeXRay;
-      applyDayNight(parseFloat(daySliderValueBeforeXRay));
-      daySliderValueBeforeXRay = null;
-    }
-  }
-
   // ── 開啟管路透視模式下關閉太陽 ──
   if (enable) {
     sunLight.userData._xray_intensity = sunLight.intensity;
@@ -1003,32 +983,32 @@ function toggleXRayMode(enable) {
   // }
 
   // ── 燈泡：用 bulbMeshes 快取 ──
-  // ── 燈泡：用 bulbMeshes 快取 ──
-  bulbMeshes.forEach(({ mesh }) => {
-    if (mesh.material) {
-      if (enable) {
-        mesh.material.userData._xray_emissive = mesh.material.emissiveIntensity;
-        mesh.material.emissiveIntensity = 0;
-      }
-      mesh.material.needsUpdate = true;
+// ── 燈泡：用 bulbMeshes 快取 ──
+bulbMeshes.forEach(({ mesh }) => {
+  if (mesh.material) {
+    if (enable) {
+      mesh.material.userData._xray_emissive = mesh.material.emissiveIntensity;
+      mesh.material.emissiveIntensity = 0;
     }
-    mesh.children.forEach(c => {
-      if (c.isLight) {
-        if (enable) {
-          c.userData._xray_intensity = c.intensity;
-          c.intensity = 0;
-        } else {
-          c.intensity = c.userData._xray_intensity ?? c.intensity;
-        }
+    mesh.material.needsUpdate = true;
+  }
+  mesh.children.forEach(c => {
+    if (c.isLight) {
+      if (enable) {
+        c.userData._xray_intensity = c.intensity;
+        c.intensity = 0;
+      } else {
+        c.intensity = c.userData._xray_intensity ?? c.intensity;
       }
-      if ((c.isMesh || c.isSprite) && (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow)) {
+    }
+    if (c.isMesh && (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow)) {
       c.visible = !enable;
     }
-    });
   });
-  if (!enable) {
-    applyBulbStrength(currentBulbStrength);
-  }
+});
+if (!enable) {
+  applyBulbStrength(currentBulbStrength);
+}
 
   // ── 一般物件：用 cachedSceneMeshes 快取 ──
   const processedMaterials = new Set();
@@ -1280,10 +1260,6 @@ Object.assign(daySlider, { type: 'range', min: '0', max: '100', value: '50' });
 Object.assign(daySlider.style, { width: '200px', cursor: 'pointer', accentColor: '#ffd97a' });
 sliderWrap.appendChild(daySlider);
 
-// ── 管路透視模式：記錄進入前的日夜滑桿數值，用於還原 ──
-const DEFAULT_DAY_VALUE = 50;
-let daySliderValueBeforeXRay = null;
-
 sliderWrap.appendChild(Object.assign(document.createElement('span'), {
   textContent: '☀️', style: 'font-size:22px'
 }));
@@ -1372,7 +1348,7 @@ function applyBulbStrength(s) {
     if (lineLights) lineLights.forEach(l => l.intensity = s * 0.3);
 
     mesh.children.forEach(c => {
-      if (!c.isMesh && !c.isSprite) return;
+      if (!c.isMesh) return;
       if (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow || c.userData.isRecBulbGlow) {
         const base = c.material.userData._baseOpacity ?? 0.1;
         c.material.opacity = s > 0.05 ? base : 0;
@@ -1382,10 +1358,7 @@ function applyBulbStrength(s) {
   });
 };
 
-daySlider.addEventListener('input', () => {
-  if (isXRayMode) return; // 管路透視模式下亮度鎖定，不回應滑桿
-  applyDayNight(parseFloat(daySlider.value));
-});
+daySlider.addEventListener('input', () => applyDayNight(parseFloat(daySlider.value)));
 daySlider.addEventListener('mousedown', e => e.stopPropagation());
 daySlider.addEventListener('click', e => e.stopPropagation());
 // ─────────────────────────────────────────
@@ -1402,10 +1375,8 @@ controls.addEventListener('lock', () => {
 
 controls.addEventListener('unlock', () => {
   if (warningModal.style.display !== 'block') {
-    if (!isXRayMode) {
-      sliderWrap.style.opacity = '1';
-      sliderWrap.style.pointerEvents = 'auto';
-    }
+    sliderWrap.style.opacity = '1';
+    sliderWrap.style.pointerEvents = 'auto';
     if (!unlockFromButton) {
       menuPanel.style.display = 'flex';
     }
@@ -1663,7 +1634,7 @@ if (isMobile) {
   function mobileUnlock() {
     if (!isMobileLocked) return;
     isMobileLocked = false;
-    if (warningModal.style.display !== 'block' && !isXRayMode) {
+    if (warningModal.style.display !== 'block') {
       sliderWrap.style.opacity = '1';
       sliderWrap.style.pointerEvents = 'auto';
     }
