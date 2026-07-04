@@ -1,6 +1,6 @@
 // scene-config.js
 const isGitHub = window.location.hostname.includes('github.io');
-const basePath = isGitHub ? '/3D_Module_Web/' : './';
+const basePath = isGitHub ? './3D_Module_Web/' : './';
 
 export const CONFIG = {
     MODELS: {
