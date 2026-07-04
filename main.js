@@ -1194,7 +1194,7 @@ function showWarning(deviceName) {
   warningText.innerHTML =
     `⚠️ 警告<br>
         <span style="color:#ffdd00;font-size:22px">${label}</span><br>
-        已持續出水超過 <span style="color:#ffdd00">1 分鐘</span>！<br>
+        已持續出水超過 <span style="color:#ffdd00">10 秒</span>！<br>
         請確認是否忘記關閉。`;
 
   warningModal.style.display = 'block';
