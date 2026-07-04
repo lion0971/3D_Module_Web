@@ -811,7 +811,7 @@ const baseRadius = Math.max(localSize.x, localSize.y, localSize.z) * 0.5;
     }
 
     // 碰撞
-    if (name.includes('wall') || name.includes('floor')) {
+    if (name.includes('wall') || name.includes('floor') || name.includes('door')) {
       collidableObjects.push(mesh);
     }
 
