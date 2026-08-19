@@ -5,7 +5,7 @@ const basePath = isGitHub ? '/3D_Module_Web/' : './';
 export const CONFIG = {
     MODELS: {
         PLANT: `${basePath}models/Plant_Turtle_LOD.glb`,
-        BUILDING: `${basePath}models/20260702_compressed_webp.glb`,
+        BUILDING: `${basePath}models/20260715.glb`,
         HDRI: `${basePath}hdri/studio-0623.hdr`
     },
     ROOM_DATA: {

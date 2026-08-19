@@ -10,10 +10,44 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+import { getDatabase, ref, onValue, set, remove } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-database.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
+
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDjEAOsrsDNzukTyacscnc6Bt71_2HVkXg",
+  authDomain: "water-alert-system-79dfa.firebaseapp.com",
+  databaseURL: "https://water-alert-system-79dfa-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "water-alert-system-79dfa",
+};
+const fbApp = initializeApp(firebaseConfig);
+
+const db = getDatabase(fbApp);
+
+// ★ 新增：匿名登入
+const auth = getAuth(fbApp);
+
+const authReadyPromise = new Promise((resolve) => {
+  onAuthStateChanged(auth, (user) => {
+    if (user) {
+      console.log('[Firebase Auth] 匿名登入成功，UID:', user.uid);
+      resolve();
+    }
+  });
+  signInAnonymously(auth).catch((err) => {
+    console.error('[Firebase Auth] 匿名登入失敗', err);
+  });
+});
+
+const LINE_NOTIFY_ENABLED = true; // ★ 設 false 暫時關閉LINE連結通知，設 true 恢復
 
 // ─────────────────────────────────────────
 // 一、全域變數
 // ─────────────────────────────────────────
+// ── 每次開啟網頁，產生獨立的 session ID，避免多人使用互相干擾 ──
+const sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+
 let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
 let prevTime = performance.now();
 const velocity = new THREE.Vector3();
@@ -53,6 +87,15 @@ function getInactivePipeOpacity() {
 const activeTimers = {};
 
 const drainFlows = {};   // DrainFlow 實例，key 為 drain 物件名稱
+
+// 需要套用烘焙 AO 貼圖的物件（名稱已 lowercase，跟 traverse 裡的 name 對應）
+const AO_BAKE_TARGETS = new Set([
+  'wall_outside',
+  'ceiling',
+  'wall_inside_1',
+  'wall_inside_2',
+  'floor',
+]);
 
 // ── 新增：管路配置表（依附件二） ──
 const PIPE_CONFIG = {
@@ -597,6 +640,11 @@ loader.setDRACOLoader(dracoLoader);
 const rgbeLoader = new RGBELoader(manager);
 //const exrLoader = new EXRLoader(manager);
 
+const textureLoader = new THREE.TextureLoader(manager);
+const aoMap = textureLoader.load('textures/bake_ao.png');
+aoMap.colorSpace = THREE.NoColorSpace; // AO 貼圖是資料貼圖，不能當 sRGB 處理
+aoMap.flipY = false; // glTF/GLB 的 UV 原點跟一般圖片不同，通常要關掉，否則貼圖會上下顛倒
+
 // ─────────────────────────────────────────
 // 六、載入資源
 // ─────────────────────────────────────────
@@ -648,6 +696,33 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
     const isDevice = !!PIPE_CONFIG[name];
     if (!isBulb && !isPipe && !isDevice) {
       cachedSceneMeshes.push(mesh);
+    }
+
+    // ✅ 套用烘焙 AO 貼圖
+    if (AO_BAKE_TARGETS.has(name) && mesh.material) {
+
+      // 1️⃣ 嚴格檢查：只認模型自帶的第三組 uv2 頂點屬性，排除 automap (uv1) 的干擾
+      if (mesh.geometry.attributes.uv2) {
+
+        // 防止多個物件共用同一個材質球，導致大家的陰影互相覆蓋、錯位
+        mesh.material = mesh.material.clone();
+
+        if (aoMap) {
+          // 🌟 依照你指定的 Three.js 新版對應規則：0=uv, 1=uv1, 2=uv2
+          // 強制將貼圖通道綁定在第三組 UV（uv2）上
+          aoMap.channel = 2;
+        }
+
+        // 正式將烘焙好的陰影貼圖掛載上去
+        mesh.material.aoMap = aoMap;
+        mesh.material.aoMapIntensity = 0.4; // 依你調整的舒適深淺度 0.5
+        mesh.material.needsUpdate = true;
+
+        console.log(`[AO] ${name} 已成功套用烘焙陰影 (確認綁定 channel = 2)`);
+      } else {
+        // 萬一 Blender 導出漏勾，直接噴警告，明確指出是缺少第三組 uv2
+        console.warn(`[AO 錯誤] ${name} 缺少真正的 uv2 通道，無法套用 AO 貼圖，請檢查 Blender 的 UV Maps 列表第三軌`);
+      }
     }
 
     // 燈泡
@@ -739,7 +814,7 @@ loader.load(CONFIG.MODELS.BUILDING, (gltf) => {
         const localCenterGeo = new THREE.Vector3();
         localBox.getCenter(localCenterGeo);
 
-const baseRadius = Math.max(localSize.x, localSize.y, localSize.z) * 0.5;
+        const baseRadius = Math.max(localSize.x, localSize.y, localSize.z) * 0.5;
 
         const pt = new THREE.PointLight(0xffcc88, 4.0, 8.0, 2);
         pt.position.copy(localCenterGeo);
@@ -846,6 +921,11 @@ const baseRadius = Math.max(localSize.x, localSize.y, localSize.z) * 0.5;
     _createWaterFlow(mesh.name.toLowerCase());
   });
 });
+
+if (AO_BAKE_TARGETS.has(name)) {
+  console.log(name, mesh.geometry.attributes);
+}
+
 
 // ── 太陽平行光（右前方斜上 45°）──
 // ── 太陽平行光（位置由 applyDayNight 動態設定）──
@@ -1022,8 +1102,8 @@ function toggleXRayMode(enable) {
         }
       }
       if ((c.isMesh || c.isSprite) && (c.userData.isLineBulbGlow || c.userData.isBallBulbGlow)) {
-      c.visible = !enable;
-    }
+        c.visible = !enable;
+      }
     });
   });
   if (!enable) {
@@ -1108,13 +1188,17 @@ Object.assign(warningCloseBtn.style, {
   margin: '16px auto 0',
 });
 warningCloseBtn.onclick = () => {
-  warningModal.style.display = 'none';
+  const deviceName = warningCloseBtn.dataset.device;
+
   for (const key in activeTimers) {
     if (activeTimers[key].startTime) activeTimers[key].startTime = Date.now();
     activeTimers[key].alerted = false;
   }
-  // 選單仍開著就不鎖定，讓游標保持可見
-  if (menuPanel.style.display !== 'flex') {
+
+  dismissCurrentWarning(deviceName); // ★ 移除目前這個，並自動顯示佇列裡的下一個
+
+  // 選單仍開著就不鎖定，讓游標保持可見；佇列還有其他警告要顯示時也不要鎖定
+  if (menuPanel.style.display !== 'flex' && warningQueue.length === 0) {
     setTimeout(() => controls.lock(), 80);
   }
 };
@@ -1134,8 +1218,10 @@ Object.assign(warningOffBtn.style, {
   display: 'block',
   margin: '10px auto 0',
 });
-warningOffBtn.onclick = () => {
-  const deviceName = warningOffBtn.dataset.device;
+
+// ★ 新增：把「關閉水流」的實際邏輯抽成獨立函式，
+//    這樣「按鈕手動關閉」跟「LINE 遠端關閉」都能共用同一套邏輯
+function closeDeviceWater(deviceName) {
   const cfg = PIPE_CONFIG[deviceName];
   if (!cfg) return;
 
@@ -1176,9 +1262,17 @@ warningOffBtn.onclick = () => {
     activeTimers[deviceName].startTime = null;
     activeTimers[deviceName].alerted = false;
   }
+}
 
-  warningModal.style.display = 'none';
-  if (menuPanel.style.display !== 'flex') {
+warningOffBtn.onclick = () => {
+  const deviceName = warningOffBtn.dataset.device;
+
+  closeDeviceWater(deviceName);
+  stopPollingRemoteClose(deviceName);
+
+  dismissCurrentWarning(deviceName); // ★ 移除目前這個，並自動顯示佇列裡的下一個
+
+  if (menuPanel.style.display !== 'flex' && warningQueue.length === 0) {
     setTimeout(() => controls.lock(), 80);
   }
 };
@@ -1188,22 +1282,100 @@ warningModal.appendChild(warningOffBtn);
  * 顯示出水超時警告
  * @param {string} deviceName 完整裝置名稱，如 'faucet', 'faucet_2', 'shower_2'
  */
-function showWarning(deviceName) {
-  const label = DEVICE_LABEL[deviceName] ?? deviceName;
+// ── Google Apps Script 網址（僅用於發送 LINE 通知） ──
 
+
+const currentWarningToken = {};
+
+async function markTimeoutAlert(deviceName, token) {
+
+  if (!LINE_NOTIFY_ENABLED) return; // ★ 關閉line連結時，直接跳過，不寫入 Firebase
+  await authReadyPromise; // ★ 確保匿名登入完成才寫入
+
+  const path = `sessions/${token}/${deviceName}`;
+  try {
+    await set(ref(db, path), {
+      status: 'timeout_alert',
+      notified: false,
+      timestamp: Date.now()
+    });
+  } catch (err) {
+    console.warn('[Firebase] 寫入超時警告失敗', err);
+  }
+}
+
+const activeListeners = {}; // 取代原本的 pollingIntervals，存放各裝置的 Firebase 監聽解除函式
+
+async function startPollingRemoteClose(deviceName, token) {
+
+  await authReadyPromise; // ★ 確保匿名登入完成才監聽
+  stopPollingRemoteClose(deviceName);
+
+  const path = `sessions/${token}/${deviceName}`;
+  const nodeRef = ref(db, path);
+
+  activeListeners[deviceName] = onValue(nodeRef, (snapshot) => {
+    const data = snapshot.val();
+    if (data && data.shouldClose) {
+      closeDeviceWater(deviceName);
+      stopPollingRemoteClose(deviceName);
+      dismissCurrentWarning(deviceName);
+      remove(nodeRef); // 讀取後刪除，避免殘留
+    }
+  }, (err) => {
+    console.warn('[Firebase] 監聽失敗', err);
+  });
+}
+
+function stopPollingRemoteClose(deviceName) {
+  if (activeListeners[deviceName]) {
+    activeListeners[deviceName](); // onValue 回傳的 unsubscribe 函式
+    delete activeListeners[deviceName];
+  }
+}
+
+const warningQueue = []; // 待顯示的裝置警告佇列
+
+function showWarning(deviceName) {
+  if (warningQueue.includes(deviceName)) return;
+  warningQueue.push(deviceName);
+
+  const token = sessionId + '_' + Date.now();
+  currentWarningToken[deviceName] = token;
+
+  markTimeoutAlert(deviceName, token);       // ★ 原本是 sendLineNotification(deviceName, token)
+  if (LINE_NOTIFY_ENABLED) {           // ★ 關閉line連結時就不需要監聽了
+    startPollingRemoteClose(deviceName, token);
+  }
+
+  if (warningQueue.length === 1) {
+    displayNextWarning();
+  }
+}
+
+function displayNextWarning() {
+  if (warningQueue.length === 0) {
+    warningModal.style.display = 'none';
+    return;
+  }
+  const deviceName = warningQueue[0];
+  const label = DEVICE_LABEL[deviceName] ?? deviceName;
   warningText.innerHTML =
     `⚠️ 警告<br>
         <span style="color:#ffdd00;font-size:22px">${label}</span><br>
-        已持續出水超過 <span style="color:#ffdd00">10 秒</span>！<br>
+        已持續出水超過 <span style="color:#ffdd00">1 分鐘</span>！<br>
         請確認是否忘記關閉。`;
-
   warningModal.style.display = 'block';
-
-  // 把裝置名稱存在按鈕上，讓關閉按鈕知道要關哪個
   warningCloseBtn.dataset.device = deviceName;
   warningOffBtn.dataset.device = deviceName;
-
   controls.unlock();
+}
+
+// 每個按鈕處理完自己的裝置後，都要呼叫：
+function dismissCurrentWarning(deviceName) {
+  const idx = warningQueue.indexOf(deviceName);
+  if (idx !== -1) warningQueue.splice(idx, 1);
+  displayNextWarning(); // 換下一個
 }
 
 // ─────────────────────────────────────────
@@ -1359,6 +1531,8 @@ function applyDayNight(t) {
 };
 
 function applyBulbStrength(s) {
+  // 管路透視模式下燈泡強制鎖定關閉，避免 animate() 裡的 lerp 動畫把燈又點亮
+  if (isXRayMode) return;
   bulbMeshes.forEach(({ mesh, spot, lineLights, ballLight, rectLight }) => {
     if (mesh.material) {
       if (lineLights) mesh.material.emissiveIntensity = s * 3;
@@ -1507,21 +1681,22 @@ renderer.domElement.addEventListener('click', () => {
       activeTimers[targetName].alerted = false;
     } else {
       activeTimers[targetName].startTime = null;
+      stopPollingRemoteClose(targetName); // 本機手動關閉/開啟後，停掉舊的輪詢
     }
   }
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyW') moveForward = true;
-  if (e.code === 'KeyS') moveBackward = true;
-  if (e.code === 'KeyA') moveLeft = true;
-  if (e.code === 'KeyD') moveRight = true;
+  if (e.code === 'KeyW' || e.code === 'ArrowUp') moveForward = true;
+  if (e.code === 'KeyS' || e.code === 'ArrowDown') moveBackward = true;
+  if (e.code === 'KeyA' || e.code === 'ArrowLeft') moveLeft = true;
+  if (e.code === 'KeyD' || e.code === 'ArrowRight') moveRight = true;
 });
 document.addEventListener('keyup', (e) => {
-  if (e.code === 'KeyW') moveForward = false;
-  if (e.code === 'KeyS') moveBackward = false;
-  if (e.code === 'KeyA') moveLeft = false;
-  if (e.code === 'KeyD') moveRight = false;
+  if (e.code === 'KeyW' || e.code === 'ArrowUp') moveForward = false;
+  if (e.code === 'KeyS' || e.code === 'ArrowDown') moveBackward = false;
+  if (e.code === 'KeyA' || e.code === 'ArrowLeft') moveLeft = false;
+  if (e.code === 'KeyD' || e.code === 'ArrowRight') moveRight = false;
 });
 
 // ─────────────────────────────────────────
